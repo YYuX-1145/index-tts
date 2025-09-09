@@ -1,5 +1,5 @@
 
 set HF_HOME=%CD%\checkpoints
 
-indextts2runtime\python.exe webui.py --host 127.0.0.1 --fp16
+indextts2runtime\python.exe webui.py --host 127.0.0.1 --fp16 --use_deepspeed --cuda_kernel
 pause
