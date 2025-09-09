@@ -1,4 +1,4 @@
-
+*.bat
 # Development Tools.
 .mypy_cache/
 .ruff_cache/
