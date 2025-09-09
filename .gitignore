@@ -1,5 +1,6 @@
 *.bat
 # Development Tools.
+Git
 .mypy_cache/
 .ruff_cache/
 __pycache__/
@@ -20,6 +21,7 @@ indextts2runtime
 /dist/
 *.egg-info/
 .pypirc
+*.whl
 
 # Operating System Junk.
 *.DS_Store
