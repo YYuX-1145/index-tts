@@ -1,3 +1,4 @@
+
 # Development Tools.
 .mypy_cache/
 .ruff_cache/
@@ -9,6 +10,7 @@ __pycache__/
 .venv*/
 venv*/
 conda_env*/
+indextts2runtime
 
 # Python Bytecode.
 *.py[cod]
