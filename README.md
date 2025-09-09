@@ -22,9 +22,9 @@
     <img src='https://img.shields.io/badge/GitHub-Demo-orange?logo=github'/>
   </a>
   <br/>
-  <!--a href='https://huggingface.co/spaces/IndexTeam/IndexTTS'>
+  <a href='https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo'>
     <img src='https://img.shields.io/badge/HuggingFace-Demo-blue?logo=huggingface'/>
-  </a-->
+  </a>
   <a href='https://huggingface.co/IndexTeam/IndexTTS-2'>
     <img src='https://img.shields.io/badge/HuggingFace-Model-blue?logo=huggingface' />
   </a>
@@ -311,7 +311,7 @@ or visit the IndexTTS1 repository at <a href="https://github.com/index-tts/index
 
 ## Our Releases and Demos
 
-### IndexTTS2: [[Paper]](https://arxiv.org/abs/2506.21619); [[Demo]](https://index-tts.github.io/index-tts2.github.io/)
+### IndexTTS2: [[Paper]](https://arxiv.org/abs/2506.21619); [[Demo]](https://index-tts.github.io/index-tts2.github.io/); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo)
 
 ### IndexTTS1: [[Paper]](https://arxiv.org/abs/2502.05512); [[Demo]](https://index-tts.github.io/); [[ModelScope]](https://modelscope.cn/studios/IndexTeam/IndexTTS-Demo); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS)
 

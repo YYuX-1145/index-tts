@@ -38,7 +38,7 @@ import torch.nn.functional as F
 class IndexTTS2:
     def __init__(
             self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_fp16=False, device=None,
-            use_cuda_kernel=None,
+            use_cuda_kernel=None,use_deepspeed=False
     ):
         """
         Args:
@@ -47,6 +47,7 @@ class IndexTTS2:
             use_fp16 (bool): whether to use fp16.
             device (str): device to use (e.g., 'cuda:0', 'cpu'). If None, it will be set automatically based on the availability of CUDA or MPS.
             use_cuda_kernel (None | bool): whether to use BigVGan custom fused activation CUDA kernel, only for CUDA device.
+            use_deepspeed (bool): whether to use deepspeed or not.
         """
         if device is not None:
             self.device = device
@@ -56,6 +57,10 @@ class IndexTTS2:
             self.device = "cuda:0"
             self.use_fp16 = use_fp16
             self.use_cuda_kernel = use_cuda_kernel is None or use_cuda_kernel
+        elif hasattr(torch, "xpu") and torch.xpu.is_available():
+            self.device = "xpu"
+            self.use_fp16 = use_fp16
+            self.use_cuda_kernel = False
         elif hasattr(torch, "mps") and torch.backends.mps.is_available():
             self.device = "mps"
             self.use_fp16 = False  # Use float16 on MPS is overhead than float32
@@ -83,12 +88,12 @@ class IndexTTS2:
             self.gpt.eval()
         print(">> GPT weights restored from:", self.gpt_path)
 
-        use_deepspeed = True
         try:
             import deepspeed
         except (ImportError, OSError, CalledProcessError) as e:
+            if use_deepspeed:
+                print(f">> DeepSpeed加载失败，回退到标准推理: {e}")
             use_deepspeed = False
-            print(f">> DeepSpeed加载失败，回退到标准推理: {e}")
 
         self.gpt.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=True, half=self.use_fp16)
 
@@ -144,7 +149,7 @@ class IndexTTS2:
         print(">> campplus_model weights restored from:", campplus_ckpt_path)
 
         bigvgan_name = self.cfg.vocoder.name
-        self.bigvgan = bigvgan.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=False)
+        self.bigvgan = bigvgan.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=True if self.use_cuda_kernel else False)
         self.bigvgan = self.bigvgan.to(self.device)
         self.bigvgan.remove_weight_norm()
         self.bigvgan.eval()
