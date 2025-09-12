@@ -1,14 +1,20 @@
 
+
 <div align="center">
 <img src='assets/index_icon.png' width="250"/>
 </div>
 
+<div align="center">
+<a href="docs/README_zh.md" style="font-size: 24px">简体中文</a> | 
+<a href="README.md" style="font-size: 24px">English</a>
+</div>
 
 ## 👉🏻 IndexTTS2 👈🏻
 
 <center><h3>IndexTTS2: A Breakthrough in Emotionally Expressive and Duration-Controlled Auto-Regressive Zero-Shot Text-to-Speech</h3></center>
 
 [![IndexTTS2](assets/IndexTTS2_banner.png)](assets/IndexTTS2_banner.png)
+
 
 <div align="center">
   <a href='https://arxiv.org/abs/2506.21619'>
@@ -133,14 +139,25 @@ git clone https://github.com/index-tts/index-tts.git && cd index-tts
 git lfs pull  # download large repository files
 ```
 
-3. Install the [uv](https://docs.astral.sh/uv/getting-started/installation/) package
-   manager. It is *required* for a reliable, modern installation environment.
+3. Install the [uv package manager](https://docs.astral.sh/uv/getting-started/installation/).
+   It is *required* for a reliable, modern installation environment.
+
+> [!TIP]
+> **Quick & Easy Installation Method:**
+> 
+> There are many convenient ways to install the `uv` command on your computer.
+> Please check the link above to see all options. Alternatively, if you want
+> a very quick and easy method, you can install it as follows:
+> 
+> ```bash
+> pip install -U uv
+> ```
 
 > [!WARNING]
 > We **only** support the `uv` installation method. Other tools, such as `conda`
 > or `pip`, don't provide any guarantees that they will install the correct
 > dependency versions. You will almost certainly have *random bugs, error messages,*
-> *missing GPU acceleration, and various other problems* if you don't use `uv`.
+> ***missing GPU acceleration**, and various other problems* if you don't use `uv`.
 > Please *do not report any issues* if you use non-standard installations, since
 > almost all such issues are invalid.
 > 
@@ -151,15 +168,18 @@ git lfs pull  # download large repository files
 4. Install required dependencies:
 
 We use `uv` to manage the project's dependency environment. The following command
-will install the correct versions of all dependencies into your `.venv` directory.
+will install the correct versions of all dependencies into your `.venv` directory:
 
 ```bash
 uv sync --all-extras
 ```
 
-If the download is slow, please try a *local mirror*, for example China:
+If the download is slow, please try a *local mirror*, for example any of these
+local mirrors in China (choose one mirror from the list below):
 
 ```bash
+uv sync --all-extras --default-index "https://mirrors.aliyun.com/pypi/simple"
+
 uv sync --all-extras --default-index "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 ```
 
@@ -169,7 +189,8 @@ uv sync --all-extras --default-index "https://mirrors.tuna.tsinghua.edu.cn/pypi/
 > - `--all-extras`: Automatically adds *every* extra feature listed below. You can
 >   remove this flag if you want to customize your installation choices.
 > - `--extra webui`: Adds WebUI support (recommended).
-> - `--extra deepspeed`: Adds DeepSpeed support (faster inference).
+> - `--extra deepspeed`: Adds DeepSpeed support (may speed up inference on some
+>   systems).
 
 > [!IMPORTANT]
 > **Important (Windows):** The DeepSpeed library may be difficult to install for
@@ -237,10 +258,19 @@ VRAM usage), DeepSpeed acceleration, compiled CUDA kernels for speed, etc. All
 available options can be seen via the following command:
 
 ```bash
-uv run python webui.py -h
+uv run webui.py -h
 ```
 
 Have fun!
+
+> [!IMPORTANT]
+> It can be very helpful to use **FP16** (half-precision) inference. It is faster
+> and uses less VRAM, with a very small quality loss.
+> 
+> **DeepSpeed** *may* also speed up inference on some systems, but it could also
+> make it slower. The performance impact is highly dependent on your specific
+> hardware, drivers and operating system. Please try with and without it,
+> to discover what works best on your personal system.
 
 
 #### 📝 Using IndexTTS2 in Python
@@ -294,6 +324,10 @@ tts.infer(spk_audio_prompt='examples/voice_07.wav', text=text, output_path="gen.
    during inference; the default is `False`, and setting it to `True` enables
    randomness:
 
+> [!NOTE]
+> Enabling random sampling will reduce the voice cloning fidelity of the speech
+> synthesis.
+
 ```python
 from indextts.infer_v2 import IndexTTS2
 tts = IndexTTS2(cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_fp16=False, use_cuda_kernel=False, use_deepspeed=False)
@@ -304,6 +338,8 @@ tts.infer(spk_audio_prompt='examples/voice_10.wav', text=text, output_path="gen.
 5. Alternatively, you can enable `use_emo_text` to guide the emotions based on
    your provided `text` script. Your text script will then automatically
    be converted into emotion vectors.
+   It's recommended to use `emo_alpha` around 0.6 (or lower) when using the text
+   emotion modes, for more natural sounding speech.
    You can introduce randomness with `use_random` (default: `False`;
    `True` enables randomness):
 
@@ -311,7 +347,7 @@ tts.infer(spk_audio_prompt='examples/voice_10.wav', text=text, output_path="gen.
 from indextts.infer_v2 import IndexTTS2
 tts = IndexTTS2(cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_fp16=False, use_cuda_kernel=False, use_deepspeed=False)
 text = "快躲起来！是他要来了！他要来抓我们了！"
-tts.infer(spk_audio_prompt='examples/voice_12.wav', text=text, output_path="gen.wav", use_emo_text=True, use_random=False, verbose=True)
+tts.infer(spk_audio_prompt='examples/voice_12.wav', text=text, output_path="gen.wav", emo_alpha=0.6, use_emo_text=True, use_random=False, verbose=True)
 ```
 
 6. It's also possible to directly provide a specific text emotion description
@@ -324,7 +360,7 @@ from indextts.infer_v2 import IndexTTS2
 tts = IndexTTS2(cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_fp16=False, use_cuda_kernel=False, use_deepspeed=False)
 text = "快躲起来！是他要来了！他要来抓我们了！"
 emo_text = "你吓死我了！你是鬼吗？"
-tts.infer(spk_audio_prompt='examples/voice_12.wav', text=text, output_path="gen.wav", use_emo_text=True, emo_text=emo_text, use_random=False, verbose=True)
+tts.infer(spk_audio_prompt='examples/voice_12.wav', text=text, output_path="gen.wav", emo_alpha=0.6, use_emo_text=True, emo_text=emo_text, use_random=False, verbose=True)
 ```
 
 
