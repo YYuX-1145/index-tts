@@ -33,6 +33,9 @@
     <img src='https://img.shields.io/badge/HuggingFace-Model-blue?logo=huggingface' />
   </a>
   <br/>
+  <a href='https://modelscope.cn/studios/IndexTeam/IndexTTS-2-Demo'>
+    <img src='https://img.shields.io/badge/ModelScope-Demo-purple?logo=modelscope'/>
+  </>
   <a href='https://modelscope.cn/models/IndexTeam/IndexTTS-2'>
     <img src='https://img.shields.io/badge/ModelScope-Model-purple?logo=modelscope'/>
   </a>
@@ -73,6 +76,13 @@ Discord：https://discord.gg/uT32E7KDmy  \
 邮箱：indexspeech@bilibili.com  \
 欢迎加入我们的社区！🌏  \
 欢迎大家交流讨论！
+
+> [!CAUTION]
+> 感谢大家对bilibili indextts项目的支持与关注！
+> 请注意，目前由核心团队直接维护的**官方渠道仅有**: [https://github.com/index-tts/index-tts](https://github.com/index-tts/index-tts).
+> ***其他任何网站或服务均非官方提供***，我们对其内容及安全性、准确性和及时性不作任何担保。
+> 为了保障您的权益，建议通过上述官方渠道获取bilibili indextts项目的最新进展与更新。
+
 
 ## 📣 更新日志
 
@@ -291,6 +301,19 @@ emo_text = "你吓死我了！你是鬼吗？"
 tts.infer(spk_audio_prompt='examples/voice_12.wav', text=text, output_path="gen.wav", emo_alpha=0.6, use_emo_text=True, emo_text=emo_text, use_random=False, verbose=True)
 ```
 
+> [!TIP]
+> **拼音使用注意事项:**
+> 
+> IndexTTS2依然支持中文字符与拼音混合建模。
+> 在使用时，如果需要精确的发音控制，请输入包含特定拼音标注的文本来触发拼音控制功能。
+> 需要注意的是：拼音控制并不是对所有声母韵母（辅音、元音）组合都生效，系统仅保留中文合法拼音的发音。
+> 具体合法情况可参考项目中的`checkpoints/pinyin.vocab`文件。
+>
+> 参考样例:
+> ```
+> 之前你做DE5很好，所以这一次也DEI3做DE2很好才XING2，如果这次目标完成得不错的话，我们就直接打DI1去银行取钱。
+> ```
+
 ### 旧版IndexTTS1使用指南
 
 如果需要使用旧的IndexTTS1.5模型，可以import旧模块：
@@ -307,7 +330,7 @@ tts.infer(voice, text, 'gen.wav')
 
 ## 演示
 
-### IndexTTS2: [[论文]](https://arxiv.org/abs/2506.21619); [[演示]](https://index-tts.github.io/index-tts2.github.io/); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo)
+### IndexTTS2: [[论文]](https://arxiv.org/abs/2506.21619); [[演示]](https://index-tts.github.io/index-tts2.github.io/); [[ModelScope]](https://modelscope.cn/studios/IndexTeam/IndexTTS-2-Demo); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo)
 
 ### IndexTTS1: [[论文]](https://arxiv.org/abs/2502.05512); [[演示]](https://index-tts.github.io/); [[ModelScope]](https://modelscope.cn/studios/IndexTeam/IndexTTS-Demo); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS)
 
@@ -320,6 +343,31 @@ tts.infer(voice, text, 'gen.wav')
 5. [icefall](https://github.com/k2-fsa/icefall)
 6. [maskgct](https://github.com/open-mmlab/Amphion/tree/main/models/tts/maskgct)
 7. [seed-vc](https://github.com/Plachtaa/seed-vc)
+
+## Bilibili 贡献者名录
+我们诚挚感谢来自Bilibili的同事们，是大家的共同努力让IndexTTS系列得以实现。
+
+### 核心作者
+ - **Siyi Zhou** – 核心作者；在IndexTTS2中主导模型架构设计与训练流程优化，重点推动多语言、多情感合成等关键功能。
+ - **Wei Deng** – 核心作者；在IndexTTS1中主导模型架构设计与训练流程，负责基础能力建设与性能优化。
+ - **Jingchen Shu** – 核心作者；负责整体架构设计、跨语种建模方案与训练策略优化，推动模型迭代。
+ - **Xun Zhou** – 核心作者；负责跨语言数据处理与实验，探索多语种训练策略，并在音质提升与稳定性评估方面作出贡献。
+ - **Jinchao Wang** – 核心作者；负责模型开发与部署，构建推理框架并支持系统落地。
+ - **Yiquan Zhou** – 核心作者；参与模型实验与验证，并提出并实现了基于文本的情感控制。
+ - **Yi He** – 核心作者；参与模型实验与验证。
+ - **Lu Wang** – 核心作者；负责数据处理与模型评测，支持模型训练与性能验证。
+
+### 技术贡献者
+ - **Yining Wang** – 技术贡献者；负责开源代码的实现与维护，支持功能适配与社区发布。
+ - **Yong Wu** – 技术贡献者；参与数据处理与实验支持，保障模型训练的数据质量与迭代效率。
+ - **Yaqin Huang** – 技术贡献者；参与系统性模型评估与效果跟进，提供反馈以支持迭代优化。
+ - **Yunhan Xu** – 技术贡献者；在录音与数据采集方面提供指导，并从产品与运营角度提出改进建议，提升模型的易用性与实际应用效果。
+ - **Yuelang Sun** – 技术贡献者；在音频录制与数据采集方面提供专业支持，保障模型训练与评测所需的高质量数据。
+ - **Yihuang Liang** – 技术贡献者；参与系统性模型评估与项目推广，帮助IndexTTS项目扩大影响力并提升用户参与度。
+
+### 技术指导
+ - **Huyang Sun** – 对IndexTTS项目给予了大力支持，确保了项目的战略方向与资源保障。
+ - **Bin Xia** – 参与技术方案的评审、优化与跟进，重点关注模型效果的保障。
 
 ## 📚 论文引用
 

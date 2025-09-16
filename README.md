@@ -35,9 +35,9 @@
     <img src='https://img.shields.io/badge/HuggingFace-Model-blue?logo=huggingface' />
   </a>
   <br/>
-  <!--a href='https://modelscope.cn/studios/IndexTeam/IndexTTS-Demo'>
+  <a href='https://modelscope.cn/studios/IndexTeam/IndexTTS-2-Demo'>
     <img src='https://img.shields.io/badge/ModelScope-Demo-purple?logo=modelscope'/>
-  </a-->
+  </>
   <a href='https://modelscope.cn/models/IndexTeam/IndexTTS-2'>
     <img src='https://img.shields.io/badge/ModelScope-Model-purple?logo=modelscope'/>
   </a>
@@ -81,6 +81,12 @@ Discord：https://discord.gg/uT32E7KDmy  \
 Email：indexspeech@bilibili.com  \
 You are welcome to join our community! 🌏  \
 欢迎大家来交流讨论！
+
+> [!CAUTION]
+> Thank you for your support of the bilibili indextts project!
+> Please note that the **only official channel** maintained by the core team is: [https://github.com/index-tts/index-tts](https://github.com/index-tts/index-tts).
+> ***Any other websites or services are not official***, and we cannot guarantee their security, accuracy, or timeliness.
+> For the latest updates, please always refer to this official repository.
 
 
 ## 📣 Updates
@@ -363,6 +369,18 @@ emo_text = "你吓死我了！你是鬼吗？"
 tts.infer(spk_audio_prompt='examples/voice_12.wav', text=text, output_path="gen.wav", emo_alpha=0.6, use_emo_text=True, emo_text=emo_text, use_random=False, verbose=True)
 ```
 
+> [!TIP]
+> **Pinyin Usage Notes:**
+> 
+> IndexTTS2 still supports mixed modeling of Chinese characters and Pinyin.
+> When you need precise pronunciation control, please provide text with specific Pinyin annotations to activate the Pinyin control feature.
+> Note that Pinyin control does not work for every possible consonant–vowel combination; only valid Chinese Pinyin cases are supported.
+> For the full list of valid entries, please refer to `checkpoints/pinyin.vocab`.
+>
+> Example:
+> ```
+> 之前你做DE5很好，所以这一次也DEI3做DE2很好才XING2，如果这次目标完成得不错的话，我们就直接打DI1去银行取钱。
+> ```
 
 ### Legacy: IndexTTS1 User Guide
 
@@ -382,7 +400,7 @@ or visit the IndexTTS1 repository at <a href="https://github.com/index-tts/index
 
 ## Our Releases and Demos
 
-### IndexTTS2: [[Paper]](https://arxiv.org/abs/2506.21619); [[Demo]](https://index-tts.github.io/index-tts2.github.io/); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo)
+### IndexTTS2: [[Paper]](https://arxiv.org/abs/2506.21619); [[Demo]](https://index-tts.github.io/index-tts2.github.io/); [[ModelScope]](https://modelscope.cn/studios/IndexTeam/IndexTTS-2-Demo); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo)
 
 ### IndexTTS1: [[Paper]](https://arxiv.org/abs/2502.05512); [[Demo]](https://index-tts.github.io/); [[ModelScope]](https://modelscope.cn/studios/IndexTeam/IndexTTS-Demo); [[HuggingFace]](https://huggingface.co/spaces/IndexTeam/IndexTTS)
 
@@ -396,6 +414,31 @@ or visit the IndexTTS1 repository at <a href="https://github.com/index-tts/index
 5. [icefall](https://github.com/k2-fsa/icefall)
 6. [maskgct](https://github.com/open-mmlab/Amphion/tree/main/models/tts/maskgct)
 7. [seed-vc](https://github.com/Plachtaa/seed-vc)
+
+## Contributors in Bilibili
+We sincerely thank colleagues from different roles at Bilibili, whose combined efforts made the IndexTTS series possible.
+
+### Core Authors
+ - **Siyi Zhou** – Core author; in IndexTTS2, led model architecture design and training pipeline optimization, focusing on key features such as multilingual and emotional synthesis.
+ - **Wei Deng** - Core author; in IndexTTS1, led model architecture design and training pipeline, focusing on fundamental capability building and performance optimization.
+ - **Jingchen Shu** - Core author; worked on overall architecture design, cross-lingual modeling solutions, and training strategy optimization, driving model iteration.
+ - **Xun Zhou** - worked on cross-lingual data processing and experiments, explored multilingual training strategies, and contributed to audio quality improvement and stability evaluation.
+ - **Jinchao Wang** - Core author; worked on model development and deployment, building the inference framework and supporting system integration.
+ - **Yiquan Zhou** - Core author; contributed to model experiments and validation, and proposed and implemented text-based emotion control.
+ - **Yi He** - Core author; contributed to model experiments and validation.
+ - **Lu Wang** – Core author; worked on data processing and model evaluation, supporting model training and performance verification.
+
+### Technical Contributors
+ - **Yining Wang** - Supporting contributor; contributed to open-source code implementation and maintenance, supporting feature adaptation and community release.
+ - **Yong Wu** - Supporting contributor; worked on data processing and experimental support, ensuring data quality and efficiency for model training and iteration.
+ - **Yaqin Huang** – Supporting contributor; contributed to systematic model evaluation and effect tracking, providing feedback to support iterative improvements.
+ - **Yunhan Xu** – Supporting contributor; provided guidance in recording and data collection, while also offering feedback from a product and operations perspective to improve usability and practical application.
+ - **Yuelang Sun** – Supporting contributor; provided professional support in audio recording and data collection, ensuring high-quality data for model training and evaluation.
+ - **Yihuang Liang** - Supporting contributor; worked on systematic model evaluation and project promotion, helping IndexTTS expand its reach and engagement.
+
+### Technical Guidance
+ - **Huyang Sun** - Provided strong support for the IndexTTS project, ensuring strategic alignment and resource backing.
+ - **Bin Xia** - Contributed to the review, optimization, and follow-up of technical solutions, focusing on ensuring model effectiveness.
 
 
 ## 📚 Citation
