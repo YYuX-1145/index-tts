@@ -99,12 +99,17 @@ async def tts_handle(req: dict):
     if check_res is not None:
         return check_res
     try:
+        emo_text=req["emo_text"]
+        use_emo_text=bool(req["emo_text"])
+        if emo_text=='auto':
+            emo_text = None
+            use_emo_text = True
         sampling_rate, wav_data = tts_pipeline.infer(
             spk_audio_prompt=req["ref_audio_path"],
             emo_audio_prompt=req["emo_ref_audio_path"] if req["emo_ref_audio_path"] else None,
             text=req["text"],
-            emo_text=req["emo_text"],
-            use_emo_text=bool(req["emo_text"]),
+            emo_text=emo_text,
+            use_emo_text=use_emo_text,
             emo_alpha=req["emo_alpha"],
             top_p=req["top_p"],
             top_k=req["top_k"],
