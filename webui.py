@@ -1,3 +1,4 @@
+import html
 import json
 import os
 import sys
@@ -5,8 +6,6 @@ import threading
 import time
 
 import warnings
-
-import numpy as np
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -65,19 +64,18 @@ LANGUAGES = {
     "中文": "zh_CN",
     "English": "en_US"
 }
-EMO_CHOICES = [i18n("与音色参考音频相同"),
+EMO_CHOICES_ALL = [i18n("与音色参考音频相同"),
                 i18n("使用情感参考音频"),
                 i18n("使用情感向量控制"),
                 i18n("使用情感描述文本控制")]
-EMO_CHOICES_BASE = EMO_CHOICES[:3]  # 基础选项
-EMO_CHOICES_EXPERIMENTAL = EMO_CHOICES  # 全部选项（包括文本描述）
+EMO_CHOICES_OFFICIAL = EMO_CHOICES_ALL[:-1]  # skip experimental features
 
 os.makedirs("outputs/tasks",exist_ok=True)
 os.makedirs("prompts",exist_ok=True)
 
 MAX_LENGTH_TO_USE_SPEED = 70
+example_cases = []
 with open("examples/cases.jsonl", "r", encoding="utf-8") as f:
-    example_cases = []
     for line in f:
         line = line.strip()
         if not line:
@@ -87,8 +85,9 @@ with open("examples/cases.jsonl", "r", encoding="utf-8") as f:
             emo_audio_path = os.path.join("examples",example["emo_audio"])
         else:
             emo_audio_path = None
+
         example_cases.append([os.path.join("examples", example.get("prompt_audio", "sample_prompt.wav")),
-                              EMO_CHOICES[example.get("emo_mode",0)],
+                              EMO_CHOICES_ALL[example.get("emo_mode",0)],
                               example.get("text"),
                              emo_audio_path,
                              example.get("emo_weight",1.0),
@@ -101,16 +100,14 @@ with open("examples/cases.jsonl", "r", encoding="utf-8") as f:
                              example.get("emo_vec_6",0),
                              example.get("emo_vec_7",0),
                              example.get("emo_vec_8",0),
-                             example.get("emo_text") is not None]
-                             )
+                             ])
 
-def normalize_emo_vec(emo_vec):
-    # emotion factors for better user experience
-    k_vec = [0.75,0.70,0.80,0.80,0.75,0.75,0.55,0.45]
-    tmp = np.array(k_vec) * np.array(emo_vec)
-    if np.sum(tmp) > 0.8:
-        tmp = tmp * 0.8/ np.sum(tmp)
-    return tmp.tolist()
+def get_example_cases(include_experimental = False):
+    if include_experimental:
+        return example_cases  # show every example
+
+    # exclude emotion control mode 3 (emotion from text description)
+    return [x for x in example_cases if x[1] != EMO_CHOICES_ALL[3]]
 
 def gen_single(emo_control_method,prompt, text,
                emo_ref_path, emo_weight,
@@ -142,12 +139,10 @@ def gen_single(emo_control_method,prompt, text,
     if emo_control_method == 0:  # emotion from speaker
         emo_ref_path = None  # remove external reference audio
     if emo_control_method == 1:  # emotion from reference audio
-        # normalize emo_alpha for better user experience
-        emo_weight = emo_weight * 0.8
         pass
     if emo_control_method == 2:  # emotion from custom vectors
         vec = [vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
-        vec = normalize_emo_vec(vec)
+        vec = tts.normalize_emo_vec(vec, apply_bias=True)
     else:
         # don't use the emotion vector inputs for the other modes
         vec = None
@@ -171,6 +166,12 @@ def update_prompt_audio():
     update_button = gr.update(interactive=True)
     return update_button
 
+def create_warning_message(warning_text):
+    return gr.HTML(f"<div style=\"padding: 0.5em 0.8em; border-radius: 0.5em; background: #ffa87d; color: #000; font-weight: bold\">{html.escape(warning_text)}</div>")
+
+def create_experimental_warning_message():
+    return create_warning_message(i18n('提示：此功能为实验版，结果尚不稳定，我们正在持续优化中。'))
+
 with gr.Blocks(title="IndexTTS Demo") as demo:
     mutex = threading.Lock()
     gr.HTML('''
@@ -193,14 +194,24 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                 input_text_single = gr.TextArea(label=i18n("文本"),key="input_text_single", placeholder=i18n("请输入目标文本"), info=f"{i18n('当前模型版本')}{tts.model_version or '1.0'}")
                 gen_button = gr.Button(i18n("生成语音"), key="gen_button",interactive=True)
             output_audio = gr.Audio(label=i18n("生成结果"), visible=True,key="output_audio")
-        experimental_checkbox = gr.Checkbox(label=i18n("显示实验功能"),value=False)
+
+        experimental_checkbox = gr.Checkbox(label=i18n("显示实验功能"), value=False)
+
         with gr.Accordion(i18n("功能设置")):
             # 情感控制选项部分
             with gr.Row():
                 emo_control_method = gr.Radio(
-                    choices=EMO_CHOICES_BASE,
+                    choices=EMO_CHOICES_OFFICIAL,
                     type="index",
-                    value=EMO_CHOICES_BASE[0],label=i18n("情感控制方式"))
+                    value=EMO_CHOICES_OFFICIAL[0],label=i18n("情感控制方式"))
+                # we MUST have an extra, INVISIBLE list of *all* emotion control
+                # methods so that gr.Dataset() can fetch ALL control mode labels!
+                # otherwise, the gr.Dataset()'s experimental labels would be empty!
+                emo_control_method_all = gr.Radio(
+                    choices=EMO_CHOICES_ALL,
+                    type="index",
+                    value=EMO_CHOICES_ALL[0], label=i18n("情感控制方式"),
+                    visible=False)  # do not render
         # 情感参考音频部分
         with gr.Group(visible=False) as emotion_reference_group:
             with gr.Row():
@@ -225,17 +236,17 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                     vec8 = gr.Slider(label=i18n("平静"), minimum=0.0, maximum=1.0, value=0.0, step=0.05)
 
         with gr.Group(visible=False) as emo_text_group:
+            create_experimental_warning_message()
             with gr.Row():
                 emo_text = gr.Textbox(label=i18n("情感描述文本"),
                                       placeholder=i18n("请输入情绪描述（或留空以自动使用目标文本作为情绪描述）"),
                                       value="",
                                       info=i18n("例如：委屈巴巴、危险在悄悄逼近"))
 
-
         with gr.Row(visible=False) as emo_weight_group:
-            emo_weight = gr.Slider(label=i18n("情感权重"), minimum=0.0, maximum=1.0, value=0.8, step=0.01)
+            emo_weight = gr.Slider(label=i18n("情感权重"), minimum=0.0, maximum=1.0, value=0.65, step=0.01)
 
-        with gr.Accordion(i18n("高级生成参数设置"), open=False,visible=False) as advanced_settings_group:
+        with gr.Accordion(i18n("高级生成参数设置"), open=False, visible=True) as advanced_settings_group:
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown(f"**{i18n('GPT2 采样设置')}** _{i18n('参数会影响音频多样性和生成速度详见')} [Generation strategies](https://huggingface.co/docs/transformers/main/en/generation_strategies)._")
@@ -272,31 +283,56 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                 length_penalty, num_beams, repetition_penalty, max_mel_tokens,
                 # typical_sampling, typical_mass,
             ]
-        
-        if len(example_cases) > 2:
-            example_table = gr.Examples(
-                examples=example_cases[:-2],
-                examples_per_page=20,
-                inputs=[prompt_audio,
-                        emo_control_method,
+
+        # we must use `gr.Dataset` to support dynamic UI rewrites, since `gr.Examples`
+        # binds tightly to UI and always restores the initial state of all components,
+        # such as the list of available choices in emo_control_method.
+        example_table = gr.Dataset(label="Examples",
+            samples_per_page=20,
+            samples=get_example_cases(include_experimental=False),
+            type="values",
+            # these components are NOT "connected". it just reads the column labels/available
+            # states from them, so we MUST link to the "all options" versions of all components,
+            # such as `emo_control_method_all` (to be able to see EXPERIMENTAL text labels)!
+            components=[prompt_audio,
+                        emo_control_method_all,  # important: support all mode labels!
                         input_text_single,
                         emo_upload,
                         emo_weight,
                         emo_text,
-                        vec1,vec2,vec3,vec4,vec5,vec6,vec7,vec8,experimental_checkbox]
-            )
-        elif len(example_cases) > 0:
-            example_table = gr.Examples(
-                examples=example_cases,
-                examples_per_page=20,
-                inputs=[prompt_audio,
-                        emo_control_method,
-                        input_text_single,
-                        emo_upload,
-                        emo_weight,
-                        emo_text,
-                        vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8, experimental_checkbox]
-            )
+                        vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
+        )
+
+    def on_example_click(example):
+        print(f"Example clicked: ({len(example)} values) = {example!r}")
+        return (
+            gr.update(value=example[0]),
+            gr.update(value=example[1]),
+            gr.update(value=example[2]),
+            gr.update(value=example[3]),
+            gr.update(value=example[4]),
+            gr.update(value=example[5]),
+            gr.update(value=example[6]),
+            gr.update(value=example[7]),
+            gr.update(value=example[8]),
+            gr.update(value=example[9]),
+            gr.update(value=example[10]),
+            gr.update(value=example[11]),
+            gr.update(value=example[12]),
+            gr.update(value=example[13]),
+        )
+
+    # click() event works on both desktop and mobile UI
+    example_table.click(on_example_click,
+                        inputs=[example_table],
+                        outputs=[prompt_audio,
+                                 emo_control_method,
+                                 input_text_single,
+                                 emo_upload,
+                                 emo_weight,
+                                 emo_text,
+                                 vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
+    )
 
     def on_input_text_change(text, max_text_tokens_per_segment):
         if text and len(text) > 0:
@@ -317,7 +353,7 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                 segments_preview: gr.update(value=df),
             }
 
-    def on_method_select(emo_control_method):
+    def on_method_change(emo_control_method):
         if emo_control_method == 1:  # emotion reference audio
             return (gr.update(visible=True),
                     gr.update(visible=False),
@@ -330,7 +366,7 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                     gr.update(visible=True),
                     gr.update(visible=True),
                     gr.update(visible=False),
-                    gr.update(visible=False)
+                    gr.update(visible=True)
                     )
         elif emo_control_method == 3:  # emotion text description
             return (gr.update(visible=False),
@@ -347,15 +383,7 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                     gr.update(visible=False)
                     )
 
-    def on_experimental_change(is_exp):
-        # 切换情感控制选项
-        # 第三个返回值实际没有起作用
-        if is_exp:
-            return gr.update(choices=EMO_CHOICES_EXPERIMENTAL, value=EMO_CHOICES_EXPERIMENTAL[0]), gr.update(visible=True),gr.update(value=example_cases)
-        else:
-            return gr.update(choices=EMO_CHOICES_BASE, value=EMO_CHOICES_BASE[0]), gr.update(visible=False),gr.update(value=example_cases[:-2])
-
-    emo_control_method.select(on_method_select,
+    emo_control_method.change(on_method_change,
         inputs=[emo_control_method],
         outputs=[emotion_reference_group,
                  emotion_randomize_group,
@@ -364,16 +392,28 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                  emo_weight_group]
     )
 
+    def on_experimental_change(is_experimental, current_mode_index):
+        # 切换情感控制选项
+        new_choices = EMO_CHOICES_ALL if is_experimental else EMO_CHOICES_OFFICIAL
+        # if their current mode selection doesn't exist in new choices, reset to 0.
+        # we don't verify that OLD index means the same in NEW list, since we KNOW it does.
+        new_index = current_mode_index if current_mode_index < len(new_choices) else 0
+
+        return (
+            gr.update(choices=new_choices, value=new_choices[new_index]),
+            gr.update(samples=get_example_cases(include_experimental=is_experimental)),
+        )
+
+    experimental_checkbox.change(
+        on_experimental_change,
+        inputs=[experimental_checkbox, emo_control_method],
+        outputs=[emo_control_method, example_table]
+    )
+
     input_text_single.change(
         on_input_text_change,
         inputs=[input_text_single, max_text_tokens_per_segment],
         outputs=[segments_preview]
-    )
-
-    experimental_checkbox.change(
-        on_experimental_change,
-        inputs=[experimental_checkbox],
-        outputs=[emo_control_method, advanced_settings_group,example_table.dataset]  # 高级参数Accordion
     )
 
     max_text_tokens_per_segment.change(

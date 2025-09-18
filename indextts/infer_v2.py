@@ -305,6 +305,22 @@ class IndexTTS2:
                 print(f"Audio too long ({audio.shape[1]} samples), truncating to {max_audio_samples} samples")
             audio = audio[:, :max_audio_samples]
         return audio, sr
+    
+    def normalize_emo_vec(self, emo_vector, apply_bias=True):
+        # apply biased emotion factors for better user experience,
+        # by de-emphasizing emotions that can cause strange results
+        if apply_bias:
+            # [happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]
+            emo_bias = [0.9375, 0.875, 1.0, 1.0, 0.9375, 0.9375, 0.6875, 0.5625]
+            emo_vector = [vec * bias for vec, bias in zip(emo_vector, emo_bias)]
+
+        # the total emotion sum must be 0.8 or less
+        emo_sum = sum(emo_vector)
+        if emo_sum > 0.8:
+            scale_factor = 0.8 / emo_sum
+            emo_vector = [vec * scale_factor for vec in emo_vector]
+
+        return emo_vector
 
     # 原始推理模式
     def infer(self, spk_audio_prompt, text, output_path,
@@ -354,6 +370,12 @@ class IndexTTS2:
 
         # 如果参考音频改变了，才需要重新生成, 提升速度
         if self.cache_spk_cond is None or self.cache_spk_audio_prompt != spk_audio_prompt:
+            if self.cache_spk_cond is not None:
+                self.cache_spk_cond = None
+                self.cache_s2mel_style = None
+                self.cache_s2mel_prompt = None
+                self.cache_mel = None
+                torch.cuda.empty_cache()
             audio,sr = self._load_and_cut_audio(spk_audio_prompt,15,verbose)
             audio_22k = torchaudio.transforms.Resample(sr, 22050)(audio)
             audio_16k = torchaudio.transforms.Resample(sr, 16000)(audio)
@@ -405,6 +427,9 @@ class IndexTTS2:
             emovec_mat = emovec_mat.unsqueeze(0)
 
         if self.cache_emo_cond is None or self.cache_emo_audio_prompt != emo_audio_prompt:
+            if self.cache_emo_cond is not None:
+                self.cache_emo_cond = None
+                torch.cuda.empty_cache()
             emo_audio, _ = self._load_and_cut_audio(emo_audio_prompt,15,verbose,sr=16000)
             emo_inputs = self.extract_features(emo_audio, sampling_rate=16000, return_tensors="pt")
             emo_input_features = emo_inputs["input_features"]
