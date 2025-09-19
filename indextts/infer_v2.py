@@ -91,9 +91,11 @@ class IndexTTS2:
         if use_deepspeed:
             try:
                 import deepspeed
-            except (ImportError, OSError, CalledProcessError) as e:
+            except Exception as e:
+                import traceback
                 use_deepspeed = False
-                print(f">> Failed to load DeepSpeed. Falling back to normal inference. Error: {e}")
+                print(f">> Failed to load DeepSpeed. Falling back to normal inference.")
+                traceback.print_exc()
 
         self.gpt.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=True, half=self.use_fp16)
 
@@ -305,7 +307,7 @@ class IndexTTS2:
                 print(f"Audio too long ({audio.shape[1]} samples), truncating to {max_audio_samples} samples")
             audio = audio[:, :max_audio_samples]
         return audio, sr
-    
+
     def normalize_emo_vec(self, emo_vector, apply_bias=True):
         # apply biased emotion factors for better user experience,
         # by de-emphasizing emotions that can cause strange results
