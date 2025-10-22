@@ -1,4 +1,5 @@
 import os
+import socket
 import random
 import re
 import time
@@ -41,6 +42,23 @@ from vllm import SamplingParams, TokensPrompt
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.v1.engine.async_llm import AsyncLLM
 
+def find_free_port(start_port: int, direction: str = "up", max_tries: int = 500, host: str = "127.0.0.1") -> int:
+    if direction not in ("up", "down"):
+        raise ValueError("direction must be 'up' or 'down'")
+    step = 1 if direction == "up" else -1
+    port = start_port
+    for _ in range(max_tries):
+        if 0 < port < 65536:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                try:
+                    s.bind((host, port))
+                    return port
+                except OSError:
+                    port += step
+        else:
+            break
+    raise RuntimeError(f"Can not find a free port. Max tries:{max_tries}")
 
 class IndexTTS2:
 
@@ -93,7 +111,7 @@ class IndexTTS2:
             tensor_parallel_size=1,
             dtype="auto",
             gpu_memory_utilization=gpu_memory_utilization,
-            data_parallel_rpc_port = 45974,
+            data_parallel_rpc_port = find_free_port(random.randint(30000,40000)),
             # enforce_eager=True,
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)
@@ -554,7 +572,7 @@ class QwenEmotion:
             dtype="auto",
             gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=2048,       
-            data_parallel_rpc_port=19881,    
+            data_parallel_rpc_port=find_free_port(random.randint(10000,20000)),    
         )
 
         self.model = AsyncLLM.from_engine_args(engine_args)
