@@ -29,6 +29,7 @@ parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16
 parser.add_argument("--deepspeed", action="store_true", default=False, help="Use DeepSpeed to accelerate if available")
 parser.add_argument("--cuda_kernel", action="store_true", default=False, help="Use CUDA kernel for inference if available")
 parser.add_argument("--gui_seg_tokens", type=int, default=120, help="GUI: Max tokens per generation segment")
+parser.add_argument("--gpu_memory_utilization", type=float, default=0.25)
 parser.add_argument("--no_qwen_emo", action="store_true", default=False, help="Disable Qwen_emotion, which can save about 2GB VRAM, but text emotion prompt will be no longer available.")
 cmd_args = parser.parse_args()
 
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     tts = IndexTTS2(model_dir=cmd_args.model_dir,
                     cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
                     is_fp16=cmd_args.fp16,
-                    # use_deepspeed=cmd_args.deepspeed,
+                    gpu_memory_utilization=cmd_args.gpu_memory_utilization,
                     use_cuda_kernel=cmd_args.cuda_kernel,
                     use_qwen_emo=not cmd_args.no_qwen_emo,
                     )
