@@ -369,7 +369,7 @@ class IndexTTS2:
         gpt_forward_time = 0
         s2mel_time = 0
         bigvgan_time = 0
-        has_warned = False
+        # has_warned = False
         for sent in sentences:
             text_tokens = self.tokenizer.convert_tokens_to_ids(sent)
             text_tokens = torch.tensor(text_tokens, dtype=torch.int32, device=self.device).unsqueeze(0)
@@ -405,14 +405,14 @@ class IndexTTS2:
                 )
                 # print("codes: ", codes)
                 gpt_gen_time += time.perf_counter() - m_start_time
-                if not has_warned and (codes[:, -1] != self.stop_mel_token).any():
-                    warnings.warn(
-                        f"WARN: generation stopped due to exceeding `max_mel_tokens` ({self.cfg.gpt.max_mel_tokens}). "
-                        f"Input text tokens: {text_tokens.shape[1]}. "
-                        f"Consider reducing `max_text_tokens_per_sentence`({max_text_tokens_per_sentence}) or increasing `max_mel_tokens`.",
-                        category=RuntimeWarning
-                    )
-                    has_warned = True
+                # if not has_warned and (codes[:, -1] != self.stop_mel_token).any():
+                #     warnings.warn(
+                #         f"WARN: generation stopped due to exceeding `max_mel_tokens` ({self.cfg.gpt.max_mel_tokens}). "
+                #         f"Input text tokens: {text_tokens.shape[1]}. "
+                #         f"Consider reducing `max_text_tokens_per_sentence`({max_text_tokens_per_sentence}) or increasing `max_mel_tokens`.",
+                #         category=RuntimeWarning
+                #     )
+                #     has_warned = True
 
                 # codes = torch.tensor(codes, dtype=torch.long, device=self.device).unsqueeze(0)
                 code_lens = torch.tensor([codes.shape[-1]], device=codes.device, dtype=codes.dtype)
