@@ -162,7 +162,7 @@ if __name__ == "__main__":
                         emo_vector=vec,
                         use_emo_text=(emo_control_method==3), emo_text=emo_text,use_random=emo_random,
                         verbose=cmd_args.verbose,
-                        max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                        max_text_tokens_per_sentence=int(max_text_tokens_per_segment),
                         **kwargs)
         return gr.update(value=output,visible=True)
 
