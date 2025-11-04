@@ -41,9 +41,9 @@ import torch.nn.functional as F
 
 
 class IndexTTS2:
-    def __init__(
-        self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, gpu_memory_utilization=0.25, use_qwen_emo=True, **kwargs
-    ):
+
+    def __init__(self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, use_torch_compile=False, gpu_memory_utilization=0.25, use_qwen_emo=True, **kwargs):
+        # Torch compile for CFM does not run correctly!!!
         """
         Args:
             cfg_path (str): path to the config file.
@@ -74,6 +74,7 @@ class IndexTTS2:
         self.model_dir = model_dir
         self.dtype = torch.float16 if self.is_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
+        self.use_torch_compile = use_torch_compile
 
         from vllm.engine.arg_utils import AsyncEngineArgs
         from vllm.v1.engine.async_llm import AsyncLLM
@@ -142,6 +143,13 @@ class IndexTTS2:
         )
         self.s2mel = s2mel.to(self.device)
         self.s2mel.models['cfm'].estimator.setup_caches(max_batch_size=1, max_seq_length=8192)
+
+        # Enable torch.compile optimization if requested
+        if self.use_torch_compile:
+            print(">> Enabling torch.compile optimization")
+            self.s2mel.enable_torch_compile()
+            print(">> torch.compile optimization enabled successfully")
+        
         self.s2mel.eval()
         print(">> s2mel weights restored from:", s2mel_path)
 

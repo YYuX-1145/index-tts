@@ -392,7 +392,7 @@ class MyModel(nn.Module):
         super(MyModel, self).__init__()
         from indextts.s2mel.modules.flow_matching import CFM
         from indextts.s2mel.modules.length_regulator import InterpolateRegulator
-        
+
         length_regulator = InterpolateRegulator(
             channels=args.length_regulator.channels,
             sampling_ratios=args.length_regulator.sampling_ratios,
@@ -418,11 +418,11 @@ class MyModel(nn.Module):
                 'cfm': CFM(args),
                 'length_regulator': length_regulator
             })
-    
+
     def forward(self, x, target_lengths, prompt_len, cond, y):
         x = self.models['cfm'](x, target_lengths, prompt_len, cond, y)
         return x
-    
+
     def forward2(self, S_ori,target_lengths,F0_ori):
         x = self.models['length_regulator'](S_ori, ylens=target_lengths, f0=F0_ori)
         return x
@@ -447,7 +447,6 @@ class MyModel(nn.Module):
         """
         if 'cfm' in self.models:
             self.models['cfm'].enable_torch_compile()
-
 
 
 def build_model(args, stage="DiT"):

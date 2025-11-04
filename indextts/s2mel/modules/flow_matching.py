@@ -159,7 +159,6 @@ class BASECFM(torch.nn.Module, ABC):
         return loss, estimator_out + (1 - self.sigma_min) * z
 
 
-
 class CFM(BASECFM):
     def __init__(self, args):
         super().__init__(
@@ -177,6 +176,7 @@ class CFM(BASECFM):
         performance improvements during inference. It also configures distributed
         training optimizations if applicable.
         """
+        self.estimator.eval()
         if torch.distributed.is_initialized():
             torch._inductor.config.reorder_for_compute_comm_overlap = True
         self.estimator = torch.compile(
