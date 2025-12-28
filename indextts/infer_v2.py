@@ -38,7 +38,7 @@ import torch.nn.functional as F
 class IndexTTS2:
     def __init__(
             self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", use_fp16=False, device=None,
-            use_cuda_kernel=None,use_deepspeed=False, use_torch_compile=False,use_qwen_emo=True
+            use_cuda_kernel=None,use_deepspeed=False, use_accel=False, use_torch_compile=False, use_torch_compile=False,use_qwen_emo=True
     ):
         """
         Args:
@@ -48,7 +48,6 @@ class IndexTTS2:
             device (str): device to use (e.g., 'cuda:0', 'cpu'). If None, it will be set automatically based on the availability of CUDA or MPS.
             use_cuda_kernel (None | bool): whether to use BigVGan custom fused activation CUDA kernel, only for CUDA device.
             use_deepspeed (bool): whether to use DeepSpeed or not.
-            use_torch_compile (bool): whether to use torch.compile for optimization or not.
         """
         if device is not None:
             self.device = device
@@ -76,12 +75,9 @@ class IndexTTS2:
         self.model_dir = model_dir
         self.dtype = torch.float16 if self.use_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
-        self.use_torch_compile = use_torch_compile
 
-        if use_qwen_emo:
-            self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
-        else:
-            self.qwen_emo = None
+        self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
+
         self.gpt = UnifiedVoice(**self.cfg.gpt)
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
         load_checkpoint(self.gpt, self.gpt_path)
@@ -468,7 +464,7 @@ class IndexTTS2:
             ref_mel = self.cache_mel
 
         if emo_vector is not None:
-            weight_vector = torch.tensor(emo_vector).to(self.device)
+            weight_vector = torch.tensor(emo_vector, device=self.device)
             if use_random:
                 random_index = [random.randint(0, x - 1) for x in self.emo_num]
             else:
@@ -595,15 +591,16 @@ class IndexTTS2:
                 #                     print(f"code len: {code_lens}")
 
                 code_lens = []
+                max_code_len = 0
                 for code in codes:
                     if self.stop_mel_token not in code:
-                        code_lens.append(len(code))
                         code_len = len(code)
                     else:
-                        len_ = (code == self.stop_mel_token).nonzero(as_tuple=False)[0] + 1
-                        code_len = len_ - 1
+                        len_ = (code == self.stop_mel_token).nonzero(as_tuple=False)[0]
+                        code_len = len_[0].item() if len_.numel() > 0 else len(code)
                     code_lens.append(code_len)
-                codes = codes[:, :code_len]
+                    max_code_len = max(max_code_len, code_len)
+                codes = codes[:, :max_code_len]
                 code_lens = torch.LongTensor(code_lens)
                 code_lens = code_lens.to(self.device)
                 if verbose:

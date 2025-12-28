@@ -439,14 +439,6 @@ class MyModel(nn.Module):
         x = self.models['gpt_layer'](x)
         return x
 
-    def enable_torch_compile(self):
-        """Enable torch.compile optimization.
-        
-        This method applies torch.compile to the model for significant
-        performance improvements during inference.
-        """
-        if 'cfm' in self.models:
-            self.models['cfm'].enable_torch_compile()
 
 
 def build_model(args, stage="DiT"):
