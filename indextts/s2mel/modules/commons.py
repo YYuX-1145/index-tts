@@ -133,8 +133,10 @@ def subsequent_mask(length):
 def fused_add_tanh_sigmoid_multiply(input_a, input_b, n_channels):
     n_channels_int = n_channels[0]
     in_act = input_a + input_b
-    t_act = torch.tanh(in_act[:, :n_channels_int, :])
-    s_act = torch.sigmoid(in_act[:, n_channels_int:, :])
+    # use torch.split to avoid dynamic slicing
+    t_act_part, s_act_part = torch.split(in_act, n_channels_int, dim=1)
+    t_act = torch.tanh(t_act_part)
+    s_act = torch.sigmoid(s_act_part)
     acts = t_act * s_act
     return acts
 
@@ -390,7 +392,7 @@ class MyModel(nn.Module):
         super(MyModel, self).__init__()
         from indextts.s2mel.modules.flow_matching import CFM
         from indextts.s2mel.modules.length_regulator import InterpolateRegulator
-        
+
         length_regulator = InterpolateRegulator(
             channels=args.length_regulator.channels,
             sampling_ratios=args.length_regulator.sampling_ratios,
@@ -416,11 +418,11 @@ class MyModel(nn.Module):
                 'cfm': CFM(args),
                 'length_regulator': length_regulator
             })
-    
+
     def forward(self, x, target_lengths, prompt_len, cond, y):
         x = self.models['cfm'](x, target_lengths, prompt_len, cond, y)
         return x
-    
+
     def forward2(self, S_ori,target_lengths,F0_ori):
         x = self.models['length_regulator'](S_ori, ylens=target_lengths, f0=F0_ori)
         return x

@@ -1,4 +1,5 @@
 *.bat
+!go-*.bat
 # Development Tools.
 Git
 .mypy_cache/

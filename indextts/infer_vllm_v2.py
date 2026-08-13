@@ -41,9 +41,9 @@ import torch.nn.functional as F
 
 
 class IndexTTS2:
-    def __init__(
-        self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, gpu_memory_utilization=0.25, use_qwen_emo=True, **kwargs
-    ):
+
+    def __init__(self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None, use_cuda_kernel=None, use_torch_compile=False, gpu_memory_utilization=0.25, use_qwen_emo=True, **kwargs):
+        # Torch compile for CFM does not run correctly!!!
         """
         Args:
             cfg_path (str): path to the config file.
@@ -74,6 +74,7 @@ class IndexTTS2:
         self.model_dir = model_dir
         self.dtype = torch.float16 if self.is_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
+        self.use_torch_compile = use_torch_compile
 
         from vllm.engine.arg_utils import AsyncEngineArgs
         from vllm.v1.engine.async_llm import AsyncLLM
@@ -178,6 +179,13 @@ class IndexTTS2:
         )
         self.s2mel = s2mel.to(self.device)
         self.s2mel.models['cfm'].estimator.setup_caches(max_batch_size=1, max_seq_length=8192)
+
+        # Enable torch.compile optimization if requested
+        if self.use_torch_compile:
+            print(">> Enabling torch.compile optimization")
+            self.s2mel.enable_torch_compile()
+            print(">> torch.compile optimization enabled successfully")
+
         self.s2mel.eval()
         print(">> s2mel weights restored from:", s2mel_path)
 
@@ -200,11 +208,18 @@ class IndexTTS2:
         print(">> bigvgan weights restored from:", bigvgan_name)
 
         self.bpe_path = os.path.join(self.model_dir, self.cfg.dataset["bpe_model"])
-        self.normalizer = TextNormalizer()
+        self.normalizer = TextNormalizer(enable_glossary=True)
         self.normalizer.load()
         print(">> TextNormalizer loaded")
+        
         self.tokenizer = TextTokenizer(self.bpe_path, self.normalizer)
         print(">> bpe model loaded from:", self.bpe_path)
+
+        # 加载术语词汇表（如果存在）
+        self.glossary_path = os.path.join(self.model_dir, "glossary.yaml")
+        if os.path.exists(self.glossary_path):
+            self.normalizer.load_glossary_from_yaml(self.glossary_path)
+            print(">> Glossary loaded from:", self.glossary_path)
 
         emo_matrix = torch.load(os.path.join(self.model_dir, self.cfg.emo_matrix))
         self.emo_matrix = emo_matrix.to(self.device)
@@ -405,7 +420,7 @@ class IndexTTS2:
         gpt_forward_time = 0
         s2mel_time = 0
         bigvgan_time = 0
-        has_warned = False
+        # has_warned = False
         for sent in sentences:
             text_tokens = self.tokenizer.convert_tokens_to_ids(sent)
             text_tokens = torch.tensor(text_tokens, dtype=torch.int32, device=self.device).unsqueeze(0)
@@ -441,14 +456,14 @@ class IndexTTS2:
                 )
                 # print("codes: ", codes)
                 gpt_gen_time += time.perf_counter() - m_start_time
-                if not has_warned and (codes[:, -1] != self.stop_mel_token).any():
-                    warnings.warn(
-                        f"WARN: generation stopped due to exceeding `max_mel_tokens` ({self.cfg.gpt.max_mel_tokens}). "
-                        f"Input text tokens: {text_tokens.shape[1]}. "
-                        f"Consider reducing `max_text_tokens_per_sentence`({max_text_tokens_per_sentence}) or increasing `max_mel_tokens`.",
-                        category=RuntimeWarning
-                    )
-                    has_warned = True
+                # if not has_warned and (codes[:, -1] != self.stop_mel_token).any():
+                #     warnings.warn(
+                #         f"WARN: generation stopped due to exceeding `max_mel_tokens` ({self.cfg.gpt.max_mel_tokens}). "
+                #         f"Input text tokens: {text_tokens.shape[1]}. "
+                #         f"Consider reducing `max_text_tokens_per_sentence`({max_text_tokens_per_sentence}) or increasing `max_mel_tokens`.",
+                #         category=RuntimeWarning
+                #     )
+                #     has_warned = True
 
                 # codes = torch.tensor(codes, dtype=torch.long, device=self.device).unsqueeze(0)
                 code_lens = torch.tensor([codes.shape[-1]], device=codes.device, dtype=codes.dtype)

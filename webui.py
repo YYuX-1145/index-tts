@@ -35,6 +35,7 @@ parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16
 parser.add_argument("--deepspeed", action="store_true", default=False, help="Use DeepSpeed to accelerate if available")
 parser.add_argument("--cuda_kernel", action="store_true", default=False, help="Use CUDA kernel for inference if available")
 parser.add_argument("--gui_seg_tokens", type=int, default=120, help="GUI: Max tokens per generation segment")
+parser.add_argument("--gpu_memory_utilization", type=float, default=0.25)
 parser.add_argument("--no_qwen_emo", action="store_true", default=False, help="Disable Qwen_emotion, which can save about 2GB VRAM, but text emotion prompt will be no longer available.")
 cmd_args = parser.parse_args()
 
@@ -64,7 +65,7 @@ if __name__ == "__main__":
     tts = IndexTTS2(model_dir=cmd_args.model_dir,
                     cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
                     is_fp16=cmd_args.fp16,
-                    # use_deepspeed=cmd_args.deepspeed,
+                    gpu_memory_utilization=cmd_args.gpu_memory_utilization,
                     use_cuda_kernel=cmd_args.cuda_kernel,
                     use_qwen_emo=not cmd_args.no_qwen_emo,
                     )
@@ -118,6 +119,21 @@ if __name__ == "__main__":
         # exclude emotion control mode 3 (emotion from text description)
         return [x for x in example_cases if x[1] != EMO_CHOICES_ALL[3]]
 
+    def format_glossary_markdown():
+        """将词汇表转换为Markdown表格格式"""
+        if not tts.normalizer.term_glossary:
+            return i18n("暂无术语")
+
+        lines = [f"| {i18n('术语')} | {i18n('中文读法')} | {i18n('英文读法')} |"]
+        lines.append("|---|---|---|")
+
+        for term, reading in tts.normalizer.term_glossary.items():
+            zh = reading.get("zh", "") if isinstance(reading, dict) else reading
+            en = reading.get("en", "") if isinstance(reading, dict) else reading
+            lines.append(f"| {term} | {zh} | {en} |")
+
+        return "\n".join(lines)
+
     async def gen_single(emo_control_method,prompt, text,
                 emo_ref_path, emo_weight,
                 vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
@@ -167,7 +183,7 @@ if __name__ == "__main__":
                         emo_vector=vec,
                         use_emo_text=(emo_control_method==3), emo_text=emo_text,use_random=emo_random,
                         verbose=cmd_args.verbose,
-                        max_text_tokens_per_segment=int(max_text_tokens_per_segment),
+                        max_text_tokens_per_sentence=int(max_text_tokens_per_segment),
                         **kwargs)
         return gr.update(value=output,visible=True)
 
@@ -204,8 +220,9 @@ if __name__ == "__main__":
                     gen_button = gr.Button(i18n("生成语音"), key="gen_button",interactive=True)
                 output_audio = gr.Audio(label=i18n("生成结果"), visible=True,key="output_audio")
 
-            experimental_checkbox = gr.Checkbox(label=i18n("显示实验功能"), value=False)
-
+            with gr.Row():
+                experimental_checkbox = gr.Checkbox(label=i18n("显示实验功能"), value=False)
+                glossary_checkbox = gr.Checkbox(label=i18n("开启术语词汇读音"), value=tts.normalizer.enable_glossary)
             with gr.Accordion(i18n("功能设置")):
                 # 情感控制选项部分
                 with gr.Row():
@@ -254,6 +271,29 @@ if __name__ == "__main__":
 
             with gr.Row(visible=False) as emo_weight_group:
                 emo_weight = gr.Slider(label=i18n("情感权重"), minimum=0.0, maximum=1.0, value=0.65, step=0.01)
+
+            # 术语词汇表管理
+            with gr.Accordion(i18n("自定义术语词汇读音"), open=False, visible=tts.normalizer.enable_glossary) as glossary_accordion:
+                gr.Markdown(i18n("自定义个别专业术语的读音"))
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        glossary_term = gr.Textbox(
+                            label=i18n("术语"),
+                            placeholder="IndexTTS2",
+                        )
+                        glossary_reading_zh = gr.Textbox(
+                            label=i18n("中文读法"),
+                            placeholder="Index T-T-S 二",
+                        )
+                        glossary_reading_en = gr.Textbox(
+                            label=i18n("英文读法"),
+                            placeholder="Index T-T-S two",
+                        )
+                        btn_add_term = gr.Button(i18n("添加术语"), scale=1)
+                    with gr.Column(scale=2):
+                        glossary_table = gr.Markdown(
+                            value=format_glossary_markdown()
+                        )
 
             with gr.Accordion(i18n("高级生成参数设置"), open=False, visible=True) as advanced_settings_group:
                 with gr.Row():
@@ -362,6 +402,48 @@ if __name__ == "__main__":
                     segments_preview: gr.update(value=df),
                 }
 
+        # 术语词汇表事件处理函数
+        def on_add_glossary_term(term, reading_zh, reading_en):
+            """添加术语到词汇表并自动保存"""
+            term = term.rstrip()
+            reading_zh = reading_zh.rstrip()
+            reading_en = reading_en.rstrip()
+
+            if not term:
+                gr.Warning(i18n("请输入术语"))
+                return gr.update()
+                
+            if not reading_zh and not reading_en:
+                gr.Warning(i18n("请至少输入一种读法"))
+                return gr.update()
+            
+
+            # 构建读法数据
+            if reading_zh and reading_en:
+                reading = {"zh": reading_zh, "en": reading_en}
+            elif reading_zh:
+                reading = {"zh": reading_zh}
+            elif reading_en:
+                reading = {"en": reading_en}
+            else:
+                reading = reading_zh or reading_en
+
+            # 添加到词汇表
+            tts.normalizer.term_glossary[term] = reading
+
+            # 自动保存到文件
+            try:
+                tts.normalizer.save_glossary_to_yaml(tts.glossary_path)
+                gr.Info(i18n("词汇表已更新"), duration=1)
+            except Exception as e:
+                gr.Error(i18n("保存词汇表时出错"))
+                print(f"Error details: {e}")
+                return gr.update()
+
+            # 更新Markdown表格
+            return gr.update(value=format_glossary_markdown())
+        
+
         def on_method_change(emo_control_method):
             if emo_control_method == 1:  # emotion reference audio
                 return (gr.update(visible=True),
@@ -419,6 +501,17 @@ if __name__ == "__main__":
             outputs=[emo_control_method, example_table]
         )
 
+        def on_glossary_checkbox_change(is_enabled):
+            """控制术语词汇表的可见性"""
+            tts.normalizer.enable_glossary = is_enabled
+            return gr.update(visible=is_enabled)
+
+        glossary_checkbox.change(
+            on_glossary_checkbox_change,
+            inputs=[glossary_checkbox],
+            outputs=[glossary_accordion]
+        )
+
         input_text_single.change(
             on_input_text_change,
             inputs=[input_text_single, max_text_tokens_per_segment],
@@ -434,6 +527,29 @@ if __name__ == "__main__":
         prompt_audio.upload(update_prompt_audio,
                             inputs=[],
                             outputs=[gen_button])
+
+        def on_demo_load():
+            """页面加载时重新加载glossary数据"""
+            try:
+                tts.normalizer.load_glossary_from_yaml(tts.glossary_path)
+            except Exception as e:
+                gr.Error(i18n("加载词汇表时出错"))
+                print(f"Failed to reload glossary on page load: {e}")
+            return gr.update(value=format_glossary_markdown())
+
+        # 术语词汇表事件绑定
+        btn_add_term.click(
+            on_add_glossary_term,
+            inputs=[glossary_term, glossary_reading_zh, glossary_reading_en],
+            outputs=[glossary_table]
+        )
+
+        # 页面加载时重新加载glossary
+        demo.load(
+            on_demo_load,
+            inputs=[],
+            outputs=[glossary_table]
+        )
 
         gen_button.click(gen_single,
                         inputs=[emo_control_method,prompt_audio, input_text_single, emo_upload, emo_weight,
