@@ -84,6 +84,9 @@ class IndexTTS2:
             tensor_parallel_size=1,
             dtype="auto",
             gpu_memory_utilization=gpu_memory_utilization,
+            # IndexTTS passes its conditioning latents directly as audio
+            # embeddings. vLLM >= 0.24 requires this explicit opt-in.
+            enable_mm_embeds=True,
             # enforce_eager=True,
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)

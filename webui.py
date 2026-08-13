@@ -4,6 +4,12 @@ import os
 import sys
 import threading
 import time
+import asyncio
+
+if sys.platform == "win32":
+    # pyzmq needs add_reader(), which the default Proactor loop does not
+    # provide. Avoid spawning Tornado's selector compatibility thread.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import warnings
 

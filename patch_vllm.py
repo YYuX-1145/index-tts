@@ -1,18 +1,29 @@
 
+import os
 import torch
 import time
 from typing import Any, List, Optional, Tuple, Union
 
 from packaging import version
 import importlib
+
+# FlashInfer's sampler JIT invokes ``link.exe`` on Windows.  Some packaged
+# environments put GNU coreutils' unrelated link.exe before MSVC's linker,
+# making engine profiling fail.  vLLM's native sampler avoids that JIT and is
+# the supported fallback selected by this environment variable.
+if os.name == "nt":
+    os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+
 vllm_version = version.parse(importlib.import_module("vllm").__version__)
 
 # 在 vllm 中注册自定义的 GPT2TTSModel
 from vllm import ModelRegistry
-from indextts.gpt.index_tts_gpt2_vllm_v1 import GPT2TTSModel
 
-ModelRegistry.register_model("GPT2InferenceModel", GPT2TTSModel)
-print("✅  Registry GPT2TTSModel to vllm")
+ModelRegistry.register_model(
+    "GPT2InferenceModel",
+    "indextts.gpt.index_tts_gpt2_vllm_v1:GPT2TTSModel",
+)
+print("[OK] Registered GPT2TTSModel with vLLM")
 
 
 # 将 position_ids 减去 prefill 的长度再加 1，以便正确计算每一步 decode 的 position embedding
@@ -274,7 +285,44 @@ def _prepare_inputs(
             num_scheduled_tokens, spec_decode_common_attn_metadata,
             max_num_scheduled_tokens)
 
-GPUModelRunner._prepare_inputs = _prepare_inputs
-print("✅  GPUModelRunner._prepare_inputs Patched")
+# Keep vLLM's current implementation intact and only apply IndexTTS' custom
+# position convention afterwards.  The full method is internal API and its
+# signature/return value changed substantially in vLLM 0.24.
+_vllm_prepare_inputs = GPUModelRunner._prepare_inputs
+
+
+def _prepare_inputs_vllm_024(
+    self,
+    scheduler_output: "SchedulerOutput",
+    num_scheduled_tokens: np.ndarray,
+):
+    result = _vllm_prepare_inputs(
+        self, scheduler_output, num_scheduled_tokens
+    )
+
+    total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+    num_reqs = self.input_batch.num_reqs
+    req_indices = np.repeat(
+        self.arange_np[:num_reqs], num_scheduled_tokens
+    )
+    prompt_offsets = torch.tensor(
+        [
+            -(len(self.requests[req_id].prompt_token_ids) - 1)
+            for req_id in self.input_batch.req_ids
+        ],
+        dtype=self.positions.dtype,
+        device=self.positions.device,
+    )
+    req_indices_gpu = torch.as_tensor(
+        req_indices, dtype=torch.long, device=self.positions.device
+    )
+    self.positions[:total_num_scheduled_tokens].add_(
+        prompt_offsets[req_indices_gpu]
+    )
+    return result
+
+
+GPUModelRunner._prepare_inputs = _prepare_inputs_vllm_024
+print("[OK] Patched GPUModelRunner._prepare_inputs")
 
 
