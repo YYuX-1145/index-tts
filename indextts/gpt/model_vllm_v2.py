@@ -1,14 +1,12 @@
 import uuid
 import os
-import functools
+import asyncio
 import patch_vllm  # ⚠️ Monkey Patch, do not delete this line
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import GPT2Config, GPT2LMHeadModel, LogitsProcessorList
-
-from transformers import GPT2Config, GPT2Model
+from safetensors.torch import load_file
 
 from indextts.gpt.conformer_encoder import ConformerEncoder
 from indextts.gpt.perceiver import PerceiverResampler
@@ -18,10 +16,6 @@ from indextts.gpt.index_tts_gpt2_vllm_v1 import PLACEHOLDER_TOKEN, PLACEHOLDER_T
 from vllm import AsyncLLMEngine, SamplingParams, TokensPrompt
 from vllm.v1.engine.async_llm import AsyncLLM
 
-
-def null_position_embeddings(range, dim):
-    return torch.zeros((range.shape[0], range.shape[1], dim), device=range.device)
-    
 
 class LearnedPositionEmbeddings(nn.Module):
     def __init__(self, seq_len, model_dim, init=.02):
@@ -110,20 +104,9 @@ class UnifiedVoice(nn.Module):
 
         max_mel_seq_len = self.max_mel_tokens + 2 + self.max_conditioning_inputs
         max_text_seq_len = self.max_text_tokens + 2
-        gpt_config = GPT2Config(vocab_size=256,  # Unused.
-                                n_positions=max_mel_seq_len + max_text_seq_len,
-                                n_ctx=max_mel_seq_len + max_text_seq_len,
-                                n_embd=model_dim,
-                                n_layer=layers,
-                                n_head=heads,
-                                gradient_checkpointing=False,
-                                use_cache=True)
-        self.gpt = GPT2Model(gpt_config)
-        # Override the built in positional embeddings
-        del self.gpt.wpe
-        self.gpt.wpe = functools.partial(null_position_embeddings, dim=model_dim)
-        # Built-in token embeddings are unused.
-        del self.gpt.wte
+        # The Transformer backbone lives exclusively in vLLM. Keeping another
+        # transformers.GPT2Model here duplicated all 24 layers on the GPU.
+        self.gpt = None
         self.mel_pos_embedding, self.text_pos_embedding  = LearnedPositionEmbeddings(max_mel_seq_len, model_dim), LearnedPositionEmbeddings(max_text_seq_len, model_dim)
 
         self.mel_solo_embedding = 0
@@ -150,6 +133,9 @@ class UnifiedVoice(nn.Module):
             max_tokens=2048,  # 605
             stop_token_ids=[self.stop_mel_token],
             include_stop_str_in_output=True,
+            extra_args={
+                "kv_transfer_params": {"include_output_tokens": True},
+            },
         )
 
     def build_aligned_inputs_and_targets(self, input, start_token, stop_token):
@@ -223,7 +209,13 @@ class UnifiedVoice(nn.Module):
         duration_emb_half = self.speed_emb(torch.ones_like(tmp).long())
         conds_latent = torch.cat((speech_conditioning_latent + emo_vec.unsqueeze(1), duration_emb_half.unsqueeze(1), duration_emb.unsqueeze(1)), 1)
         
-        text_inputs, _ = self.build_aligned_inputs_and_targets(text_inputs, self.start_text_token, self.stop_text_token)
+        # Match the legacy teacher-forward context exactly:
+        # [TEXT_START, text..., TEXT_STOP].  Omitting TEXT_STOP changes every
+        # subsequent mel hidden state, not merely the sequence alignment.
+        text_inputs = F.pad(text_inputs, (0, 1), value=self.stop_text_token)
+        text_inputs, _ = self.build_aligned_inputs_and_targets(
+            text_inputs, self.start_text_token, self.stop_text_token
+        )
         text_emb = self.text_embedding(text_inputs) + self.text_pos_embedding(text_inputs)
 
         emb = torch.cat([conds_latent, text_emb], dim=1)
@@ -233,18 +225,66 @@ class UnifiedVoice(nn.Module):
         inputs_embeds = torch.cat([emb, mel_start_emb], dim=1)
 
         fake_inputs = PLACEHOLDER_TOKEN * 1  # [PLACEHOLDER_TOKEN_ID]
-        multi_modal_data = {"audio": {"audio_embeds": [inputs_embeds.squeeze(0).cpu()]}}
+        multi_modal_data = {
+            "audio": {
+                "audio_embeds": [inputs_embeds.detach().squeeze(0).cpu()]
+            }
+        }
         tokens_prompt = TokensPrompt(prompt=fake_inputs, multi_modal_data=multi_modal_data)
         # tokens_prompt = TokensPrompt(prompt_token_ids=fake_inputs, multi_modal_data=multi_modal_data)
         output_generator = self.llm.generate(tokens_prompt, sampling_params=self.sampling_params, request_id=uuid.uuid4().hex)
-        # latent = []
         async for output in output_generator:
-            # latent.append(output.hidden_states.clone())
             pass
         codes = output.outputs[0].token_ids[:-2]
         codes = torch.tensor(codes, device=text_inputs.device, dtype=torch.long).unsqueeze(0)
 
-        return codes, speech_conditioning_latent
+        hs_path = (output.kv_transfer_params or {}).get("hidden_states_path")
+        if not hs_path:
+            raise RuntimeError("vLLM did not return the GPT hidden-state export path")
+        exported = None
+        last_error = None
+        for _ in range(200):
+            try:
+                exported = load_file(hs_path, device="cpu")
+                break
+            except (FileNotFoundError, OSError) as error:
+                last_error = error
+                await asyncio.sleep(0.01)
+        if exported is None:
+            raise RuntimeError(
+                f"Timed out reading vLLM hidden states from {hs_path}"
+            ) from last_error
+        try:
+            os.remove(hs_path)
+        except OSError:
+            pass
+        hidden_states = exported["hidden_states"][:, 0]
+        exported_token_ids = exported.get("token_ids")
+        if exported_token_ids is not None:
+            expected_prompt_len = inputs_embeds.shape[1]
+            if exported_token_ids.numel() < expected_prompt_len:
+                raise RuntimeError(
+                    "vLLM hidden-state export is shorter than the GPT prompt: "
+                    f"{exported_token_ids.numel()} < {expected_prompt_len}"
+                )
+
+        # The legacy teacher-forward fed [MEL_START, code_0, ..., code_n,
+        # MEL_STOP] and returned ``[:-2]``. Therefore the s2mel latent begins
+        # at MEL_START's hidden state (which predicts code_0), not at code_0's
+        # hidden state. Starting at prompt_len shifted the entire conditioning
+        # sequence by one frame and audibly degraded synthesis.
+        latent_start = inputs_embeds.shape[1] - 1
+        latent = hidden_states[latent_start:]
+        latent = latent[:codes.shape[1]].to(
+            device=text_inputs.device, dtype=inputs_embeds.dtype
+        ).unsqueeze(0)
+        if latent.shape[1] != codes.shape[1]:
+            raise RuntimeError(
+                "vLLM GPT latent/code length mismatch: "
+                f"latent={latent.shape[1]}, codes={codes.shape[1]}"
+            )
+
+        return codes, speech_conditioning_latent, latent
 
     def forward(self, speech_conditioning_latent, text_inputs, text_lengths, mel_codes, mel_codes_lengths, emo_speech_conditioning_latent,
                 cond_mel_lengths=None, emo_cond_mel_lengths=None, emo_vec=None, use_speed=None, do_spk_cond=False):

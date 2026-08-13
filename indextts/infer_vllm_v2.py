@@ -87,6 +87,26 @@ class IndexTTS2:
             # IndexTTS passes its conditioning latents directly as audio
             # embeddings. vLLM >= 0.24 requires this explicit opt-in.
             enable_mm_embeds=True,
+            hf_overrides={
+                "eagle_aux_hidden_state_layer_ids": [self.cfg.gpt.layers],
+            },
+            speculative_config={
+                "method": "extract_hidden_states",
+                "num_speculative_tokens": 1,
+            },
+            kv_transfer_config={
+                "kv_connector": "IndexTTSHiddenStatesConnector",
+                "kv_connector_module_path": (
+                    "indextts.gpt.vllm_hidden_states_connector"
+                ),
+                "kv_role": "kv_producer",
+                "kv_connector_extra_config": {
+                    "shared_storage_path": os.path.join(
+                        model_dir, ".vllm_hidden_states"
+                    ),
+                    "use_synchronization_lock": False,
+                },
+            },
             # enforce_eager=True,
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)
@@ -98,7 +118,20 @@ class IndexTTS2:
 
         self.gpt = UnifiedVoice(indextts_vllm, **self.cfg.gpt)
         self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
-        load_checkpoint(self.gpt, self.gpt_path)
+        checkpoint = torch.load(self.gpt_path, map_location="cpu")
+        checkpoint = checkpoint.get("model", checkpoint)
+        non_backbone = {
+            key: value for key, value in checkpoint.items()
+            if not key.startswith("gpt.")
+        }
+        missing, unexpected = self.gpt.load_state_dict(
+            non_backbone, strict=False
+        )
+        unexpected = [
+            key for key in unexpected if not key.startswith("gpt.")
+        ]
+        if unexpected:
+            raise RuntimeError(f"Unexpected GPT checkpoint keys: {unexpected}")
         self.gpt = self.gpt.to(self.device)
         # if self.is_fp16:
         #     self.gpt.eval().half()
@@ -398,7 +431,7 @@ class IndexTTS2:
                     emovec = emovec_mat + (1 - torch.sum(weight_vector)) * emovec
                     # emovec = emovec_mat
 
-                codes, speech_conditioning_latent = await self.gpt.inference_speech(
+                codes, speech_conditioning_latent, latent = await self.gpt.inference_speech(
                     spk_cond_emb,
                     text_tokens,
                     emo_cond_emb,
@@ -444,18 +477,6 @@ class IndexTTS2:
                 #                 code_lens*self.gpt.mel_length_compression,
                 #                 cond_mel_lengths=torch.tensor([speech_conditioning_latent.shape[-1]], device=text_tokens.device),
                 #                 return_latent=True, clip_inputs=False)
-                latent = self.gpt(
-                    speech_conditioning_latent,
-                    text_tokens,
-                    torch.tensor([text_tokens.shape[-1]], device=text_tokens.device),
-                    codes,
-                    torch.tensor([codes.shape[-1]], device=text_tokens.device),
-                    emo_cond_emb,
-                    cond_mel_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_cond_mel_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_vec=emovec,
-                    use_speed=use_speed,
-                )
                 gpt_forward_time += time.perf_counter() - m_start_time
 
                 dtype = None
@@ -516,7 +537,7 @@ class IndexTTS2:
                 print(">> remove old wav file:", output_path)
             if os.path.dirname(output_path) != "":
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            torchaudio.save(output_path, wav.type(torch.int16), sampling_rate)
+            # torchaudio.save(output_path, wav.type(torch.int16), sampling_rate)
             print(">> wav file saved to:", output_path)
             return output_path
         else:

@@ -15,7 +15,11 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.sequence import IntermediateTensors
-from vllm.model_executor.models.interfaces import SupportsPP
+from vllm.model_executor.models.interfaces import (
+    EagleModelMixin,
+    SupportsEagle3,
+    SupportsPP,
+)
 
 from vllm.model_executor.models.utils import (
     is_pp_missing_parameter,
@@ -139,7 +143,7 @@ class GPT2TTSMultiModalProcessor(BaseMultiModalProcessor[GPT2TTSProcessingInfo])
         ]
 
 @support_torch_compile
-class GPT2Model(nn.Module):
+class GPT2Model(nn.Module, EagleModelMixin):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
@@ -195,6 +199,8 @@ class GPT2Model(nn.Module):
             return IntermediateTensors({"hidden_states": hidden_states})
 
         hidden_states = self.ln_f(hidden_states)
+        if self.aux_hidden_state_layers:
+            return hidden_states, [hidden_states]
         return hidden_states
 
     def load_weights(self, weights: Iterable[tuple[str,
@@ -244,7 +250,7 @@ class LearnedPositionEmbeddings(nn.Module):
 @MULTIMODAL_REGISTRY.register_processor(GPT2TTSMultiModalProcessor,
                                         info=GPT2TTSProcessingInfo,
                                         dummy_inputs=GPT2TTSDummyInputsBuilder)
-class GPT2TTSModel(nn.Module, SupportsPP, SupportsMultiModal):
+class GPT2TTSModel(nn.Module, SupportsPP, SupportsMultiModal, SupportsEagle3):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
@@ -273,6 +279,12 @@ class GPT2TTSModel(nn.Module, SupportsPP, SupportsMultiModal):
     # 实现 SupportsMultiModal 接口方法
     def get_language_model(self) -> torch.nn.Module:
         return self.transformer
+
+    def set_aux_hidden_state_layers(self, layers: tuple[int, ...]) -> None:
+        self.transformer._set_aux_hidden_state_layers(layers)
+
+    def get_eagle3_default_aux_hidden_state_layers(self) -> tuple[int, ...]:
+        return (self.config.n_layer,)
 
     def embed_multimodal(
         self,
@@ -354,8 +366,13 @@ class GPT2TTSModel(nn.Module, SupportsPP, SupportsMultiModal):
             inputs_embeds=inputs_embeds
         )
         
-        # if get_pp_group().is_last_rank:
+        aux_hidden_states = None
+        if isinstance(transformer_output, tuple):
+            transformer_output, aux_hidden_states = transformer_output
         transformer_output = self.final_norm(transformer_output)
+        if aux_hidden_states is not None:
+            # s2mel consumes the same final-normalized state used by the LM head.
+            return transformer_output, [transformer_output]
             
         return transformer_output
 
