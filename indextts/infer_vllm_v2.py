@@ -52,6 +52,19 @@ class IndexTTS2:
             device (str): device to use (e.g., 'cuda:0', 'cpu'). If None, it will be set automatically based on the availability of CUDA or MPS.
             use_cuda_kernel (None | bool): whether to use BigVGan custom fused activation CUDA kernel, only for CUDA device.
         """
+        default_cfg_path = os.path.join(model_dir, "config.yaml")
+        if (
+            not os.path.isfile(cfg_path)
+            and os.path.normcase(os.path.abspath(cfg_path))
+            == os.path.normcase(os.path.abspath(default_cfg_path))
+        ):
+            # Upstream no longer tracks checkpoints/config.yaml. Keep the
+            # standalone vLLM API entry point working, not only webui.py which
+            # already performs this download before constructing the model.
+            from indextts.utils.model_download import ensure_config_available
+
+            ensure_config_available(model_dir, version="2")
+
         if device is not None:
             self.device = device
             self.is_fp16 = False if device == "cpu" else is_fp16
