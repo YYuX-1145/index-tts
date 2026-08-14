@@ -18,5 +18,5 @@ set PATH=%PATH%;%VS_PATH%\VC\Tools\MSVC\%MSVC_VER%\bin\Hostx64\x64
 echo MSVC VER: %MSVC_VER%
 
 :run
-indextts2runtime\python.exe webui.py --host 127.0.0.1 --fp16 --cuda_kernel --no_qwen_emo --gpu_memory_utilization 0.25
+indextts2runtime\python.exe webui.py --host 127.0.0.1 --version 2 --vllm --fp16 --cuda_kernel --no_qwen_emo --gpu_memory_utilization 0.25
 pause
