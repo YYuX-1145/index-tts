@@ -186,43 +186,46 @@ class UnifiedVoice(nn.Module):
         return conds.squeeze(1)
 
     async def inference_speech(self, speech_condition, text_inputs, emo_speech_condition=None, cond_lengths=None, emo_cond_lengths=None, emo_vec=None, use_speed=False):
-        if speech_condition.ndim == 2:
-            speech_condition = speech_condition.unsqueeze(0)
-        if emo_speech_condition is None:
-            emo_speech_condition = speech_condition
-        if cond_lengths is None:
-            cond_lengths = torch.tensor([speech_condition.shape[-1]], device=speech_condition.device)
-        if emo_cond_lengths is None:
-            emo_cond_lengths = torch.tensor([emo_speech_condition.shape[-1]], device=speech_condition.device) 
+        # Do not let a thread-local PyTorch mode span vLLM's async generator.
+        # Concurrent asyncio requests otherwise restore each other's grad mode.
+        with torch.no_grad():
+            if speech_condition.ndim == 2:
+                speech_condition = speech_condition.unsqueeze(0)
+            if emo_speech_condition is None:
+                emo_speech_condition = speech_condition
+            if cond_lengths is None:
+                cond_lengths = torch.tensor([speech_condition.shape[-1]], device=speech_condition.device)
+            if emo_cond_lengths is None:
+                emo_cond_lengths = torch.tensor([emo_speech_condition.shape[-1]], device=speech_condition.device)
 
-        speech_conditioning_latent = self.get_conditioning(speech_condition.transpose(1,2), cond_lengths)
-        if emo_vec is None:
-            print('compute emo vec')
-            emo_vec = self.get_emo_conditioning(emo_speech_condition.transpose(1,2), emo_cond_lengths)
-            emo_vec = self.emovec_layer(emo_vec)
-            emo_vec = self.emo_layer(emo_vec)
-        else:
-            print('Use the specified emotion vector')
+            speech_conditioning_latent = self.get_conditioning(speech_condition.transpose(1,2), cond_lengths)
+            if emo_vec is None:
+                print('compute emo vec')
+                emo_vec = self.get_emo_conditioning(emo_speech_condition.transpose(1,2), emo_cond_lengths)
+                emo_vec = self.emovec_layer(emo_vec)
+                emo_vec = self.emo_layer(emo_vec)
+            else:
+                print('Use the specified emotion vector')
 
-        tmp = torch.zeros(text_inputs.size(0)).to(text_inputs.device)
-        duration_emb =  self.speed_emb(torch.zeros_like(tmp).long())
-        duration_emb_half = self.speed_emb(torch.ones_like(tmp).long())
-        conds_latent = torch.cat((speech_conditioning_latent + emo_vec.unsqueeze(1), duration_emb_half.unsqueeze(1), duration_emb.unsqueeze(1)), 1)
-        
-        # Match the legacy teacher-forward context exactly:
-        # [TEXT_START, text..., TEXT_STOP].  Omitting TEXT_STOP changes every
-        # subsequent mel hidden state, not merely the sequence alignment.
-        text_inputs = F.pad(text_inputs, (0, 1), value=self.stop_text_token)
-        text_inputs, _ = self.build_aligned_inputs_and_targets(
-            text_inputs, self.start_text_token, self.stop_text_token
-        )
-        text_emb = self.text_embedding(text_inputs) + self.text_pos_embedding(text_inputs)
+            tmp = torch.zeros(text_inputs.size(0)).to(text_inputs.device)
+            duration_emb =  self.speed_emb(torch.zeros_like(tmp).long())
+            duration_emb_half = self.speed_emb(torch.ones_like(tmp).long())
+            conds_latent = torch.cat((speech_conditioning_latent + emo_vec.unsqueeze(1), duration_emb_half.unsqueeze(1), duration_emb.unsqueeze(1)), 1)
 
-        emb = torch.cat([conds_latent, text_emb], dim=1)
+            # Match the legacy teacher-forward context exactly:
+            # [TEXT_START, text..., TEXT_STOP].  Omitting TEXT_STOP changes every
+            # subsequent mel hidden state, not merely the sequence alignment.
+            text_inputs = F.pad(text_inputs, (0, 1), value=self.stop_text_token)
+            text_inputs, _ = self.build_aligned_inputs_and_targets(
+                text_inputs, self.start_text_token, self.stop_text_token
+            )
+            text_emb = self.text_embedding(text_inputs) + self.text_pos_embedding(text_inputs)
 
-        mel_start_emb = self.mel_embedding(torch.full((emb.shape[0], 1,), fill_value=self.start_mel_token, dtype=torch.long, device=text_inputs.device))
-        mel_start_emb = mel_start_emb + self.mel_pos_embedding(mel_start_emb)
-        inputs_embeds = torch.cat([emb, mel_start_emb], dim=1)
+            emb = torch.cat([conds_latent, text_emb], dim=1)
+
+            mel_start_emb = self.mel_embedding(torch.full((emb.shape[0], 1,), fill_value=self.start_mel_token, dtype=torch.long, device=text_inputs.device))
+            mel_start_emb = mel_start_emb + self.mel_pos_embedding(mel_start_emb)
+            inputs_embeds = torch.cat([emb, mel_start_emb], dim=1)
 
         fake_inputs = PLACEHOLDER_TOKEN * 1  # [PLACEHOLDER_TOKEN_ID]
         multi_modal_data = {

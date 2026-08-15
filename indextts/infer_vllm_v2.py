@@ -461,89 +461,80 @@ class IndexTTS2:
                     emovec = emovec_mat + (1 - torch.sum(weight_vector)) * emovec
                     # emovec = emovec_mat
 
-                codes, speech_conditioning_latent, latent = await self.gpt.inference_speech(
-                    spk_cond_emb,
-                    text_tokens,
-                    emo_cond_emb,
-                    cond_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
-                    emo_vec=emovec,
+            # No torch mode context may span the async vLLM request.
+            codes, speech_conditioning_latent, latent = await self.gpt.inference_speech(
+                spk_cond_emb,
+                text_tokens,
+                emo_cond_emb,
+                cond_lengths=torch.tensor([spk_cond_emb.shape[-1]], device=text_tokens.device),
+                emo_cond_lengths=torch.tensor([emo_cond_emb.shape[-1]], device=text_tokens.device),
+                emo_vec=emovec,
+            )
+            # print("codes: ", codes)
+            gpt_gen_time += time.perf_counter() - m_start_time
+
+            code_lens = []
+            for code in codes:
+                if self.stop_mel_token not in code:
+                    code_len = len(code)
+                else:
+                    len_ = (code == self.stop_mel_token).nonzero(as_tuple=False)[0] + 1
+                    code_len = len_ - 1
+                code_lens.append(code_len)
+            codes = codes[:, :code_len]
+            code_lens = torch.LongTensor(code_lens).to(self.device)
+            if verbose:
+                print(codes, type(codes))
+                print(f"fix codes shape: {codes.shape}, codes type: {codes.dtype}")
+                print(f"code len: {code_lens}")
+
+            m_start_time = time.perf_counter()
+            # The Transformers teacher-forward pass was replaced by vLLM's
+            # hidden-state export; retain this timing field for log compatibility.
+            gpt_forward_time += time.perf_counter() - m_start_time
+
+            # CFM returns inference tensors, so consume them through BigVGAN
+            # synchronously with gradients disabled.
+            with torch.no_grad():
+                m_start_time = time.perf_counter()
+                diffusion_steps = 25
+                inference_cfg_rate = 0.7
+                latent = self.s2mel.models['gpt_layer'](latent)
+                S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
+                S_infer = S_infer.transpose(1, 2)
+                S_infer = S_infer + latent
+                target_lengths = (code_lens * 1.72).long()
+
+                cond = self.s2mel.models['length_regulator'](
+                    S_infer,
+                    ylens=target_lengths,
+                    n_quantizers=3,
+                    f0=None,
+                )[0]
+                cat_condition = torch.cat([prompt_condition, cond], dim=1)
+                vc_target = self.s2mel.models['cfm'].inference(
+                    cat_condition,
+                    torch.LongTensor([cat_condition.size(1)]).to(cond.device),
+                    ref_mel,
+                    style,
+                    None,
+                    diffusion_steps,
+                    inference_cfg_rate=inference_cfg_rate,
                 )
-                # print("codes: ", codes)
-                gpt_gen_time += time.perf_counter() - m_start_time
-                # if not has_warned and (codes[:, -1] != self.stop_mel_token).any():
-                #     warnings.warn(
-                #         f"WARN: generation stopped due to exceeding `max_mel_tokens` ({self.cfg.gpt.max_mel_tokens}). "
-                #         f"Input text tokens: {text_tokens.shape[1]}. "
-                #         f"Consider reducing `max_text_tokens_per_sentence`({max_text_tokens_per_sentence}) or increasing `max_mel_tokens`.",
-                #         category=RuntimeWarning
-                #     )
-                #     has_warned = True
-
-                # codes = torch.tensor(codes, dtype=torch.long, device=self.device).unsqueeze(0)
-                code_lens = torch.tensor([codes.shape[-1]], device=codes.device, dtype=codes.dtype)
-
-                code_lens = []
-                for code in codes:
-                    if self.stop_mel_token not in code:
-                        # code_lens.append(len(code))
-                        code_len = len(code)
-                    else:
-                        len_ = (code == self.stop_mel_token).nonzero(as_tuple=False)[0] + 1
-                        code_len = len_ - 1
-                    code_lens.append(code_len)
-                codes = codes[:, :code_len]
-                code_lens = torch.LongTensor(code_lens)
-                code_lens = code_lens.to(self.device)
-                if verbose:
-                    print(codes, type(codes))
-                    print(f"fix codes shape: {codes.shape}, codes type: {codes.dtype}")
-                    print(f"code len: {code_lens}")
+                vc_target = vc_target[:, :, ref_mel.size(-1):]
+                s2mel_time += time.perf_counter() - m_start_time
 
                 m_start_time = time.perf_counter()
-                use_speed = torch.zeros(spk_cond_emb.size(0)).to(spk_cond_emb.device).long()
-                # latent = self.gpt(speech_conditioning_latent, text_tokens,
-                #                 torch.tensor([text_tokens.shape[-1]], device=text_tokens.device), codes,
-                #                 code_lens*self.gpt.mel_length_compression,
-                #                 cond_mel_lengths=torch.tensor([speech_conditioning_latent.shape[-1]], device=text_tokens.device),
-                #                 return_latent=True, clip_inputs=False)
-                gpt_forward_time += time.perf_counter() - m_start_time
-
-                dtype = None
-                with torch.amp.autocast(text_tokens.device.type, enabled=dtype is not None, dtype=dtype):
-                    m_start_time = time.perf_counter()
-                    diffusion_steps = 25
-                    inference_cfg_rate = 0.7
-                    latent = self.s2mel.models['gpt_layer'](latent)
-                    S_infer = self.semantic_codec.quantizer.vq2emb(codes.unsqueeze(1))
-                    S_infer = S_infer.transpose(1, 2)
-                    S_infer = S_infer + latent
-                    target_lengths = (code_lens * 1.72).long()
-
-                    cond = self.s2mel.models['length_regulator'](S_infer,
-                                                                 ylens=target_lengths,
-                                                                 n_quantizers=3,
-                                                                 f0=None)[0]
-                    cat_condition = torch.cat([prompt_condition, cond], dim=1)
-                    vc_target = self.s2mel.models['cfm'].inference(cat_condition,
-                                                                   torch.LongTensor([cat_condition.size(1)]).to(
-                                                                       cond.device),
-                                                                   ref_mel, style, None, diffusion_steps,
-                                                                   inference_cfg_rate=inference_cfg_rate)
-                    vc_target = vc_target[:, :, ref_mel.size(-1):]
-                    s2mel_time += time.perf_counter() - m_start_time
-
-                    m_start_time = time.perf_counter()
-                    wav = self.bigvgan(vc_target.float()).squeeze().unsqueeze(0)
-                    print(wav.shape)
-                    bigvgan_time += time.perf_counter() - m_start_time
-                    wav = wav.squeeze(1)
-
+                wav = self.bigvgan(vc_target.float()).squeeze().unsqueeze(0)
+                print(wav.shape)
+                bigvgan_time += time.perf_counter() - m_start_time
+                wav = wav.squeeze(1)
                 wav = torch.clamp(32767 * wav, -32767.0, 32767.0)
-                if verbose:
-                    print(f"wav shape: {wav.shape}", "min:", wav.min(), "max:", wav.max())
-                # wavs.append(wav[:, :-512])
-                wavs.append(wav.cpu())  # to cpu before saving
+
+            if verbose:
+                print(f"wav shape: {wav.shape}", "min:", wav.min(), "max:", wav.max())
+            # wavs.append(wav[:, :-512])
+            wavs.append(wav.cpu())  # to cpu before saving
         end_time = time.perf_counter()
 
         wavs = self.insert_interval_silence(wavs, sampling_rate=sampling_rate, interval_silence=interval_silence)

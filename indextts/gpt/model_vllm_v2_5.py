@@ -239,6 +239,7 @@ class UnifiedVoice(nn.Module):
         max_generate_length: int | None = None,
         typical_sampling: bool = False,
         typical_mass: float = 0.9,
+        autocast_dtype: torch.dtype | None = None,
         **generation_kwargs: Any,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         del use_speed, use_campplus, wav, typical_sampling, typical_mass
@@ -251,42 +252,59 @@ class UnifiedVoice(nn.Module):
         if campplus_embedding is None:
             raise ValueError("IndexTTS-2.5 requires a CAMPPlus embedding")
 
-        if speech_condition.ndim == 2:
-            speech_condition = speech_condition.unsqueeze(0)
-        if emo_speech_condition is None:
-            emo_speech_condition = speech_condition
-        if cond_lengths is None:
-            cond_lengths = torch.tensor(
-                [speech_condition.shape[-1]], device=speech_condition.device
-            )
-        if emo_cond_lengths is None:
-            emo_cond_lengths = torch.tensor(
-                [emo_speech_condition.shape[-1]],
-                device=emo_speech_condition.device,
-            )
+        # Torch grad/inference/autocast modes are thread-local rather than
+        # asyncio-task-local. Keep this context entirely before vLLM's async
+        # generation so concurrent requests cannot restore each other's mode.
+        with torch.no_grad():
+            with torch.amp.autocast(
+                text_inputs.device.type,
+                enabled=autocast_dtype is not None,
+                dtype=autocast_dtype,
+            ):
+                if speech_condition.ndim == 2:
+                    speech_condition = speech_condition.unsqueeze(0)
+                if emo_speech_condition is None:
+                    emo_speech_condition = speech_condition
+                if cond_lengths is None:
+                    cond_lengths = torch.tensor(
+                        [speech_condition.shape[-1]],
+                        device=speech_condition.device,
+                    )
+                if emo_cond_lengths is None:
+                    emo_cond_lengths = torch.tensor(
+                        [emo_speech_condition.shape[-1]],
+                        device=emo_speech_condition.device,
+                    )
 
-        speech_conditioning_latent = self.spk_emb_proj(campplus_embedding)
-        if speech_conditioning_latent.ndim != 3:
-            speech_conditioning_latent = speech_conditioning_latent.unsqueeze(1)
+                speech_conditioning_latent = self.spk_emb_proj(
+                    campplus_embedding
+                )
+                if speech_conditioning_latent.ndim != 3:
+                    speech_conditioning_latent = (
+                        speech_conditioning_latent.unsqueeze(1)
+                    )
 
-        if emo_vec is None:
-            emo_vec = self.get_emovec(
-                emo_speech_condition, emo_cond_lengths
-            )
-        zero_controls = torch.zeros(
-            speech_conditioning_latent.shape[0],
-            2,
-            speech_conditioning_latent.shape[2],
-            dtype=speech_conditioning_latent.dtype,
-            device=speech_conditioning_latent.device,
-        )
-        conditional_latents = torch.cat(
-            [speech_conditioning_latent + emo_vec.unsqueeze(1), zero_controls],
-            dim=1,
-        )
-        inputs_embeds = self.prepare_gpt_inputs(
-            conditional_latents, text_inputs, langs
-        )
+                if emo_vec is None:
+                    emo_vec = self.get_emovec(
+                        emo_speech_condition, emo_cond_lengths
+                    )
+                zero_controls = torch.zeros(
+                    speech_conditioning_latent.shape[0],
+                    2,
+                    speech_conditioning_latent.shape[2],
+                    dtype=speech_conditioning_latent.dtype,
+                    device=speech_conditioning_latent.device,
+                )
+                conditional_latents = torch.cat(
+                    [
+                        speech_conditioning_latent + emo_vec.unsqueeze(1),
+                        zero_controls,
+                    ],
+                    dim=1,
+                )
+                inputs_embeds = self.prepare_gpt_inputs(
+                    conditional_latents, text_inputs, langs
+                )
 
         do_sample = bool(generation_kwargs.pop("do_sample", True))
         temperature = float(generation_kwargs.pop("temperature", 0.8))
