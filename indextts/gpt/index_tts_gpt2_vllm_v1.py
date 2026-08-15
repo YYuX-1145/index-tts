@@ -37,6 +37,7 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor, PromptReplaceme
                                         BaseProcessingInfo, PromptInsertion,
                                         PromptUpdate, PromptUpdateDetails)
 from vllm.multimodal.processing import BaseDummyInputsBuilder
+from vllm.multimodal.processing.inputs import ProcessorInputs
 from vllm.multimodal.parse import (MultiModalDataParser, DictEmbeddingItems,
                                    ModalityDataItems, MultiModalDataItems)
 # from vllm.model_executor.models.utils import merge_multimodal_embeddings
@@ -46,6 +47,11 @@ PLACEHOLDER_TOKEN_ID = 0
 
 
 class GPT2TTSProcessingInfo(BaseProcessingInfo):
+    def get_tokenizer(self):
+        # IndexTTS passes token IDs directly; no Hugging Face tokenizer is
+        # involved in the audio-code model.
+        return self.ctx.tokenizer
+
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
         # 声明我们支持 'audio' 模态
         return {"audio": None}
@@ -77,6 +83,26 @@ class GPT2TTSDummyInputsBuilder(BaseDummyInputsBuilder[GPT2TTSProcessingInfo]):
         
         return {"audio": {"audio_embeds": [dummy_embed] * num_items}}
 
+    def get_dummy_processor_inputs(
+        self,
+        seq_len: int,
+        mm_counts: Mapping[str, int],
+        mm_options: Optional[Mapping[str, Any]] = None,
+    ) -> ProcessorInputs:
+        dummy_mm_data = self.get_dummy_mm_data(
+            seq_len,
+            mm_counts,
+            mm_options,
+        )
+        return ProcessorInputs(
+            prompt=[PLACEHOLDER_TOKEN_ID] * mm_counts.get("audio", 0),
+            mm_data_items=self.info.parse_mm_data(
+                dummy_mm_data,
+                validate=False,
+            ),
+            tokenization_kwargs={},
+        )
+
 class GPT2TTSDataParser(MultiModalDataParser):
     """
     这个解析器重写了处理 'audio' 模态的方法。
@@ -106,6 +132,23 @@ class GPT2TTSDataParser(MultiModalDataParser):
         raise TypeError(f"For 'audio' modality, expected a dict like {'{'} 'audio_embeds': tensor {'}'}, but got {type(data)}")
 
 class GPT2TTSMultiModalProcessor(BaseMultiModalProcessor[GPT2TTSProcessingInfo]):
+    def _apply_hf_processor_mm_only(
+        self,
+        mm_items: MultiModalDataItems,
+        hf_processor_mm_kwargs: Mapping[str, object],
+        tokenization_kwargs: Mapping[str, object],
+    ) -> BatchFeature:
+        valid_mm_items = mm_items.select(
+            {key for key, count in mm_items.get_all_counts().items() if count > 0}
+        )
+        processor_data, passthrough_data = self._get_hf_mm_data(valid_mm_items)
+        if processor_data:
+            return super()._apply_hf_processor_mm_only(
+                mm_items,
+                hf_processor_mm_kwargs,
+                tokenization_kwargs,
+            )
+        return BatchFeature(passthrough_data)
     
     def _get_mm_fields_config(
         self,
@@ -137,7 +180,7 @@ class GPT2TTSMultiModalProcessor(BaseMultiModalProcessor[GPT2TTSProcessingInfo])
         return [
             PromptReplacement(
                 modality="audio",
-                target=PLACEHOLDER_TOKEN,  # [PLACEHOLDER_TOKEN_ID],
+                target=[PLACEHOLDER_TOKEN_ID],
                 replacement=get_replacement,
             )
         ]

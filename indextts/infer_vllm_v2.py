@@ -124,6 +124,7 @@ class IndexTTS2:
             # enforce_eager=True,
         )
         indextts_vllm = AsyncLLM.from_engine_args(engine_args)
+        print(">> vLLM GPT backbone loaded from:", vllm_dir)
 
         if use_qwen_emo:
             self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
@@ -146,13 +147,14 @@ class IndexTTS2:
         ]
         if unexpected:
             raise RuntimeError(f"Unexpected GPT checkpoint keys: {unexpected}")
+        del checkpoint, non_backbone
         self.gpt = self.gpt.to(self.device)
         # if self.is_fp16:
         #     self.gpt.eval().half()
         # else:
         #     self.gpt.eval()
         self.gpt.eval()
-        print(">> GPT weights restored from:", self.gpt_path)
+        print(">> GPT non-backbone weights restored from:", self.gpt_path)
 
         if self.use_cuda_kernel:
             # preload the CUDA kernel for BigVGAN
@@ -565,7 +567,7 @@ class IndexTTS2:
                 print(">> remove old wav file:", output_path)
             if os.path.dirname(output_path) != "":
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            # torchaudio.save(output_path, wav.type(torch.int16), sampling_rate)
+            torchaudio.save(output_path, wav.type(torch.int16), sampling_rate)
             print(">> wav file saved to:", output_path)
             return output_path
         else:

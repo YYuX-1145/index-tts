@@ -38,15 +38,9 @@ parser.add_argument("--accel", action="store_true", default=False, help="Use GPT
 parser.add_argument("--torch_compile", action="store_true", default=False, help="Use torch.compile to optimize s2mel if available")
 parser.add_argument("--qwen_emo", action="store_true", default=False, help="Load QwenEmotion even on a low-VRAM GPU, where it is skipped by default")
 parser.add_argument("--no_qwen_emo", action="store_true", default=False, help="Disable QwenEmotion to reduce VRAM usage")
-parser.add_argument("--vllm", action="store_true", default=False, help="Use the vLLM backend (currently supported for IndexTTS-2)")
 parser.add_argument("--gpu_memory_utilization", type=float, default=0.25, help="GPU memory fraction reserved by vLLM")
 parser.add_argument("--gui_seg_tokens", type=int, default=120, help="GUI: Max tokens per generation segment")
 cmd_args = parser.parse_args()
-
-if cmd_args.vllm and cmd_args.version != "2":
-    parser.error("--vllm currently supports --version 2 only; IndexTTS-2.5 support is not implemented yet")
-if cmd_args.vllm and cmd_args.accel:
-    parser.error("--vllm and --accel select different GPT backends and cannot be enabled together")
 
 # Validate optional acceleration dependencies early, so missing extras fail
 # at startup instead of halfway through inference.
@@ -112,12 +106,10 @@ from indextts.utils.examples_downloader import ensure_examples_available
 from indextts.utils.presets import list_presets, save_preset, load_preset, delete_preset
 from tools.i18n.i18n import I18nAuto
 
-if cmd_args.vllm:
-    from indextts.infer_vllm_v2 import IndexTTS2
-elif IS_V25:
-    from indextts.infer_v2_5 import IndexTTS2
+if IS_V25:
+    from indextts.infer_vllm_v2_5 import IndexTTS2
 else:
-    from indextts.infer_v2 import IndexTTS2
+    from indextts.infer_vllm_v2 import IndexTTS2
 
 i18n = I18nAuto(language="Auto")
 MODE = 'local'
@@ -156,23 +148,11 @@ def build_tts(use_accel=False, use_torch_compile=False):
     """Build an IndexTTS2 instance with the requested acceleration options."""
     import torch
 
-    if cmd_args.vllm:
-        return IndexTTS2(
-            model_dir=cmd_args.model_dir,
-            cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
-            is_fp16=HALF_PRECISION,
-            gpu_memory_utilization=cmd_args.gpu_memory_utilization,
-            use_cuda_kernel=cmd_args.cuda_kernel,
-            use_torch_compile=use_torch_compile,
-            use_qwen_emo=LOAD_QWEN_EMO,
-        )
-
     kwargs = dict(
         model_dir=cmd_args.model_dir,
         cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
-        use_deepspeed=cmd_args.deepspeed,
+        gpu_memory_utilization=cmd_args.gpu_memory_utilization,
         use_cuda_kernel=cmd_args.cuda_kernel,
-        use_accel=use_accel,
         use_torch_compile=use_torch_compile,
         use_qwen_emo=LOAD_QWEN_EMO,
     )
@@ -182,11 +162,30 @@ def build_tts(use_accel=False, use_torch_compile=False):
             print(">> BF16 is not supported on this device, falling back to full precision.")
         kwargs["use_bf16"] = use_bf16
     else:
-        kwargs["use_fp16"] = HALF_PRECISION
+        kwargs["is_fp16"] = HALF_PRECISION
     return IndexTTS2(**kwargs)
 
 
-tts = build_tts(use_accel=cmd_args.accel, use_torch_compile=cmd_args.torch_compile)
+if __name__ == "__main__":
+    # vLLM starts EngineCore with multiprocessing "spawn" on Windows.  The
+    # spawned interpreter imports this file as __mp_main__, so constructing the
+    # engine unconditionally here would recursively start another EngineCore.
+    from multiprocessing import freeze_support
+
+    freeze_support()
+    tts = build_tts(use_accel=cmd_args.accel, use_torch_compile=cmd_args.torch_compile)
+else:
+    # The Gradio layout below only needs model metadata while the spawned
+    # process imports the main module.  Keep the custom vLLM model imports above
+    # active, but do not load checkpoints or create another engine client.
+    from types import SimpleNamespace
+    from omegaconf import OmegaConf
+
+    _webui_cfg = OmegaConf.load(os.path.join(cmd_args.model_dir, "config.yaml"))
+    tts = SimpleNamespace(
+        cfg=_webui_cfg,
+        model_version=getattr(_webui_cfg, "version", None),
+    )
 # 支持的语言列表
 LANGUAGES = {
     "中文": "zh_CN",
@@ -711,18 +710,14 @@ async def gen_single(emo_control_method,prompt, text,
     )
     if IS_V25:
         infer_kwargs["lang"] = lang_choice or "ZH"
-    if cmd_args.vllm:
+    if not IS_V25:
         # The vLLM V2 backend predates the upstream argument rename and does
         # not yet implement V2.5's duration control.
         infer_kwargs["max_text_tokens_per_sentence"] = infer_kwargs.pop(
             "max_text_tokens_per_segment"
         )
         infer_kwargs.pop("duration_factor")
-        output = await tts.infer(**infer_kwargs)
-    else:
-        # Keep synchronous Transformers/V2.5 inference off Gradio's asyncio
-        # event loop now that this callback also supports the async backend.
-        output = await asyncio.to_thread(tts.infer, **infer_kwargs)
+    output = await tts.infer(**infer_kwargs)
     return gr.update(value=output,visible=True)
 
 def update_prompt_audio():

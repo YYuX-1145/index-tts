@@ -1,5 +1,7 @@
 *.bat
 !go-*.bat
+checkpoints
+ffmpeg
 # Development Tools.
 Git
 .mypy_cache/

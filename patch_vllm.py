@@ -23,7 +23,7 @@ ModelRegistry.register_model(
     "GPT2InferenceModel",
     "indextts.gpt.index_tts_gpt2_vllm_v1:GPT2TTSModel",
 )
-print("[OK] Registered GPT2TTSModel with vLLM")
+print("✅ Registered GPT2TTSModel with vLLM")
 
 
 # 将 position_ids 减去 prefill 的长度再加 1，以便正确计算每一步 decode 的 position embedding
@@ -323,6 +323,6 @@ def _prepare_inputs_vllm_024(
 
 
 GPUModelRunner._prepare_inputs = _prepare_inputs_vllm_024
-print("[OK] Patched GPUModelRunner._prepare_inputs")
+print("✅ Patched GPUModelRunner._prepare_inputs")
 
 

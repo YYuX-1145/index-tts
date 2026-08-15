@@ -13,8 +13,6 @@ from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
 from io import BytesIO
 
-from indextts.infer_vllm_v2 import IndexTTS2
-
 from pydantic import BaseModel
 
 """
@@ -31,6 +29,7 @@ torchaudio.save = patched_save
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_dir", type=str, default="./checkpoints", help="Model checkpoints directory")
+parser.add_argument("--version", type=str, default="2.5", choices=["2", "2.5"], help="Model version to use")
 parser.add_argument("-a", "--bind_addr", type=str, default="127.0.0.1", help="default: 127.0.0.1")
 parser.add_argument("-p", "--port", type=int, default="9880", help="default: 9880")
 parser.add_argument("--fp16", action="store_true", default=False, help="Use FP16 for inference if available")
@@ -39,6 +38,12 @@ parser.add_argument("--cuda_kernel", action="store_true", default=False, help="U
 parser.add_argument("--gpu_memory_utilization", type=float, default=0.25)
 parser.add_argument("--no_qwen_emo", action="store_true", default=False, help="Disable Qwen_emotion, which can save about 2GB VRAM, but text emotion prompt will be no longer available.")
 args = parser.parse_args()
+
+IS_V25 = args.version == "2.5"
+if IS_V25:
+    from indextts.infer_vllm_v2_5 import IndexTTS2
+else:
+    from indextts.infer_vllm_v2 import IndexTTS2
 
 # device = args.device
 port = args.port
@@ -64,6 +69,9 @@ class TTS_Request(BaseModel):
     seed: int = -1
     parallel_infer: bool = True
     repetition_penalty: float = 10
+    lang: str = "ZH"
+    duration_factor: float | None = None
+    text_normalization: bool = True
 
 
 def pack_wav(io_buffer: BytesIO, data: np.ndarray, rate: int):
@@ -108,7 +116,7 @@ async def tts_handle(req: dict):
             emo_text = None
             if req["normalize_emo_vec"]:
                 emo_vec = tts_pipeline.normalize_emo_vec(emo_vec)
-        sampling_rate, wav_data = await tts_pipeline.infer(
+        infer_kwargs = dict(
             spk_audio_prompt=req["ref_audio_path"],
             emo_audio_prompt=req["emo_ref_audio_path"] if req["emo_ref_audio_path"] else None,
             text=req["text"],
@@ -122,6 +130,19 @@ async def tts_handle(req: dict):
             repetition_penalty=req["repetition_penalty"],
             output_path=None,
         )
+        if IS_V25:
+            duration_factor = req.get("duration_factor")
+            if duration_factor is None:
+                speed_factor = float(req.get("speed_factor", 1.0))
+                if speed_factor <= 0:
+                    raise ValueError("speed_factor must be greater than zero")
+                duration_factor = 1.0 / speed_factor
+            infer_kwargs.update(
+                lang=req.get("lang", "ZH"),
+                duration_factor=duration_factor,
+                text_normalization=req.get("text_normalization", True),
+            )
+        sampling_rate, wav_data = await tts_pipeline.infer(**infer_kwargs)
         return Response(pack_wav(BytesIO(), wav_data, sampling_rate).getvalue(), media_type=f"audio/wav")
     except Exception as e:
         print("Error:", e)
@@ -151,6 +172,9 @@ async def tts_get_endpoint(
     seed: int = -1,
     parallel_infer: bool = True,
     repetition_penalty: float = 10,
+    lang: str = "ZH",
+    duration_factor: float | None = None,
+    text_normalization: bool = True,
 ):
     req = {
         "text": text,
@@ -167,6 +191,11 @@ async def tts_get_endpoint(
         "seed": seed,
         "parallel_infer": parallel_infer,
         "repetition_penalty": float(repetition_penalty),
+        "lang": lang,
+        "duration_factor": (
+            float(duration_factor) if duration_factor is not None else None
+        ),
+        "text_normalization": text_normalization,
     }
     return await tts_handle(req)
 
@@ -188,14 +217,23 @@ async def tts_post_endpoint(request: TTS_Request):
 
 
 if __name__ == "__main__":
-    tts_pipeline = IndexTTS2(
+    init_kwargs = dict(
         model_dir=args.model_dir,
         cfg_path=os.path.join(args.model_dir, "config.yaml"),
-        is_fp16=args.fp16,
         gpu_memory_utilization=args.gpu_memory_utilization,
         use_cuda_kernel=args.cuda_kernel,
         use_qwen_emo=not args.no_qwen_emo,
     )
+    if IS_V25:
+        import torch
+
+        use_bf16 = args.fp16 and torch.cuda.is_bf16_supported()
+        if args.fp16 and not use_bf16:
+            print(">> BF16 is not supported; using full precision for V2.5")
+        init_kwargs["use_bf16"] = use_bf16
+    else:
+        init_kwargs["is_fp16"] = args.fp16
+    tts_pipeline = IndexTTS2(**init_kwargs)
     try:
         if host == "None":
             host = None
