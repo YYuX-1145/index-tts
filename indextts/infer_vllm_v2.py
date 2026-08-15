@@ -567,7 +567,11 @@ class IndexTTS2:
                 print(">> remove old wav file:", output_path)
             if os.path.dirname(output_path) != "":
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            torchaudio.save(output_path, wav.type(torch.int16), sampling_rate)
+            # torchaudio >= 2.9 saves through TorchCodec, whose encoder expects
+            # float32 samples in [-1, 1]. ``wav`` is PCM16-scaled at this point;
+            # passing int16 would only cast to float and cause severe clipping.
+            wav_to_save = wav.to(torch.float32).div(32768.0).clamp(-1.0, 1.0)
+            torchaudio.save(output_path, wav_to_save, sampling_rate)
             print(">> wav file saved to:", output_path)
             return output_path
         else:

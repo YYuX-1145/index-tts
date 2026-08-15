@@ -573,7 +573,11 @@ class IndexTTS2:
                         os.remove(output_path)
                     if os.path.dirname(output_path) != "":
                         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                    torchaudio.save(output_path, wav, sampling_rate)
+                    # torchaudio >= 2.9 saves through TorchCodec, whose encoder
+                    # expects float32 samples in [-1, 1]. The merged chunks are
+                    # PCM16-scaled, so normalize them before encoding.
+                    wav_to_save = wav.to(torch.float32).div(32768.0).clamp(-1.0, 1.0)
+                    torchaudio.save(output_path, wav_to_save, sampling_rate)
                     print(">> wav file saved to:", output_path)
                     return output_path
                 else:
@@ -918,7 +922,11 @@ class IndexTTS2:
             if os.path.dirname(output_path) != "":
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-            torchaudio.save(output_path, wav.type(torch.int16), sampling_rate)
+            # torchaudio >= 2.9 saves through TorchCodec, whose encoder expects
+            # float32 samples in [-1, 1]. ``wav`` is PCM16-scaled at this point;
+            # passing int16 would only cast to float and cause severe clipping.
+            wav_to_save = wav.to(torch.float32).div(32768.0).clamp(-1.0, 1.0)
+            torchaudio.save(output_path, wav_to_save, sampling_rate)
             print(">> wav file saved to:", output_path)
             if stream_return:
                 return
