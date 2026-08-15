@@ -70,7 +70,6 @@ class TTS_Request(BaseModel):
     parallel_infer: bool = True
     repetition_penalty: float = 10
     lang: str = "ZH"
-    duration_factor: float | None = None
     text_normalization: bool = True
 
 
@@ -131,15 +130,12 @@ async def tts_handle(req: dict):
             output_path=None,
         )
         if IS_V25:
-            duration_factor = req.get("duration_factor")
-            if duration_factor is None:
-                speed_factor = float(req.get("speed_factor", 1.0))
-                if speed_factor <= 0:
-                    raise ValueError("speed_factor must be greater than zero")
-                duration_factor = 1.0 / speed_factor
+            speed_factor = float(req.get("speed_factor", 1.0))
+            if speed_factor <= 0:
+                raise ValueError("speed_factor must be greater than zero")
             infer_kwargs.update(
                 lang=req.get("lang", "ZH"),
-                duration_factor=duration_factor,
+                duration_factor=1.0 / speed_factor,
                 text_normalization=req.get("text_normalization", True),
             )
         sampling_rate, wav_data = await tts_pipeline.infer(**infer_kwargs)
@@ -173,7 +169,6 @@ async def tts_get_endpoint(
     parallel_infer: bool = True,
     repetition_penalty: float = 10,
     lang: str = "ZH",
-    duration_factor: float | None = None,
     text_normalization: bool = True,
 ):
     req = {
@@ -192,9 +187,6 @@ async def tts_get_endpoint(
         "parallel_infer": parallel_infer,
         "repetition_penalty": float(repetition_penalty),
         "lang": lang,
-        "duration_factor": (
-            float(duration_factor) if duration_factor is not None else None
-        ),
         "text_normalization": text_normalization,
     }
     return await tts_handle(req)
